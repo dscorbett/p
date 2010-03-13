@@ -10,22 +10,25 @@ use warnings;
 use constant SQRT2 => sqrt 2;
 use constant INVALID => "\n";
 use constant UNSPECIFIED => "";
+
 =pod
 use constant SHADE_SOLID => "Û";
 use constant SHADE_HIGH => "²";
 use constant SHADE_MEDIUM => "±";
 use constant SHADE_LOW => "°";
 =cut
+#=pod
 use constant SHADE_SOLID => "#";
 use constant SHADE_HIGH => "*";
 use constant SHADE_MEDIUM => ".";
 use constant SHADE_LOW => "'";
+#=cut
 
 use constant PART_MAP => 0;
-use constant PART_ETHNE => 1;
-use constant PART_RELIGION => 2;
-use constant PART_LANGUAGE => 3;
-use constant PART_ALPHABET => 4;
+use constant PART_ALPHABET => 1;
+use constant PART_LANGUAGE => 2;
+use constant PART_RELIGION => 3;
+use constant PART_ETHNE => 4;
 use constant PART_STATE => 5;
 use constant PART_CITY => 6;
 
@@ -34,15 +37,18 @@ use constant DEMO_RELIGION => 1;
 use constant DEMO_LANGUAGE => 2;
 use constant DEMO_ALPHABET => 3;
 
-use constant ETHNE_SING => 0;
-use constant ETHNE_PL => 1;
-use constant ETHNE_ADJ => 2;
-use constant ETHNE_MASS => 3;
-use constant ETHNE_RELIGION => 4;
-use constant ETHNE_LANGUAGE => 5;
-use constant HERMIT => qw/hermit hermits eremetic hermits 0 0/;
-use constant HERMIT_SYMBOL => "0";
+use constant ALPHABET_PARAMETERS => 0;
+use constant ALPHABET_NAME => 0;
+use constant ORAL => ("oral tradition");
+use constant ORAL_SYMBOL => "0";
 
+use constant LANGUAGE_PARAMETERS => 1;
+use constant LANGUAGE_NAME => 0;
+use constant LANGUAGE_ALPHABET => 1;
+use constant GRUNTS => qw/grunts 0/;
+use constant GRUNTS_SYMBOL => "0";
+
+use constant RELIGION_PARAMETERS => 3;
 use constant RELIGION_NAME => 0;
 use constant RELIGION_ADJ => 1;
 use constant RELIGION_SING => 2;
@@ -50,14 +56,13 @@ use constant RELIGION_PL => 3;
 use constant ATHEISM => qw/atheism atheist atheist atheists/;
 use constant ATHEISM_SYMBOL => "0";
 
-use constant LANGUAGE_NAME => 0;
-use constant LANGUAGE_ALPHABET => 1;
-use constant GRUNTS => qw/grunts 0/;
-use constant GRUNTS_SYMBOL => "0";
-
-use constant ALPHABET_NAME => 0;
-use constant ORAL => ("oral tradition only");
-use constant ORAL_SYMBOL => "0";
+use constant ETHNE_PARAMETERS => 3;
+use constant ETHNE_SING => 0;
+use constant ETHNE_PL => 1;
+use constant ETHNE_ADJ => 2;
+use constant ETHNE_DEMOGRAPHICS => 3;
+use constant HERMIT => qw/hermit hermits eremetic 00./;
+use constant HERMIT_SYMBOL => "0";
 
 use constant STATE_PARAMETERS => 5;
 use constant STATE_NAME => 0;
@@ -137,26 +142,35 @@ while (<DATA>) {
   
   if ($part == PART_MAP) {
     push @tile, [split //, $_];
-  } elsif ($part == PART_ETHNE) {
-    my @ethne = split /:/, $_;
-    my $ethne = shift @ethne;
-    die "Ethne \"$ethne\" must have the format \"symbol:singular:plural:adjective:mass:religion:language\" on line $line\n" if (@ethne != 6);
-    $ethne{$ethne} = [@ethne];
-  } elsif ($part == PART_RELIGION) {
-    my @religion = split /:/, $_;
-    my $religion = shift @religion;
-    die "Religion \"$religion\" must have the format \"symbol:name:adjective:singular:plural\" on line $line\n" if (@religion != 4);
-    $religion{$religion} = [@religion];
-  } elsif ($part == PART_LANGUAGE) {
-    my @language = split /:/, $_;
-    my $language = shift @language;
-    die "Language \"$language\" must have the format \"symbol:name:alphabet\" on line $line\n" if (@language != 2);
-    $language{$language} = [@language];
   } elsif ($part == PART_ALPHABET) {
     my @alphabet = split /:/, $_;
     my $alphabet = shift @alphabet;
-    die "Alphabet \"$alphabet\" must have the format \"symbol:name\" on line $line\n" if (@alphabet != 1);
+    die "Alphabet \"$alphabet\" must have the format \"symbol:name\" on line $line\n" if ($#alphabet != ALPHABET_PARAMETERS);
     $alphabet{$alphabet} = [@alphabet];
+  } elsif ($part == PART_LANGUAGE) {
+    my @language = split /:/, $_;
+    my $language = shift @language;
+    die "Language \"$language\" must have the format \"symbol:name:alphabet\" on line $line\n" if ($#language != LANGUAGE_PARAMETERS);
+    die "Alphabet $language[LANGUAGE_ALPHABET] does not exist for the language $language[LANGUAGE_NAME] on line $line\n" unless (exists $alphabet{$language[LANGUAGE_ALPHABET]});
+    $language{$language} = [@language];
+  } elsif ($part == PART_RELIGION) {
+    my @religion = split /:/, $_;
+    my $religion = shift @religion;
+    die "Religion \"$religion\" must have the format \"symbol:name:adjective:singular:plural\" on line $line\n" if ($#religion != RELIGION_PARAMETERS);
+    $religion{$religion} = [@religion];
+  } elsif ($part == PART_ETHNE) {
+    my @ethne = split /:/, $_;
+    my $ethne = shift @ethne;
+    die "Ethne \"$ethne\" must have the format \"symbol:singular:plural:adjective:demographics\" on line $line\n" if ($#ethne != ETHNE_PARAMETERS);
+    die "Demographics in ethne \"$ethne\" must have the format \"RLA\" on line $line\n" if ($ethne[ETHNE_DEMOGRAPHICS] !~ /(.)(.)(.)/);
+    my $religion = $1;
+    my $language = $2;
+    my $alphabet = $3;
+    die "Religion $religion does not exist for the $ethne[ETHNE_PL] on line $line\n" unless (exists $religion{$religion});
+    die "Language $language does not exist for the $ethne[ETHNE_PL] on line $line\n" unless (exists $language{$language});
+    $alphabet = alphabet_language ($language) if ($alphabet eq ".");
+    die "Alphabet $alphabet does not exist for the $ethne[ETHNE_PL] on line $line\n" unless (exists $alphabet{$alphabet});
+    $ethne{$ethne} = [@ethne];
   } elsif ($part == PART_STATE) {
     my @tmp = split /:/, $_, STATE_PARAMETERS + 2;
     my $symbol = shift @tmp;
@@ -175,6 +189,7 @@ while (<DATA>) {
       $language = language_ethne ($ethne) if ($language eq ".");
       $alphabet = alphabet_language ($language) if ($alphabet eq ".");
       $details = "$ethne$religion$language$alphabet";
+print "STATE $tmp[STATE_NAME]: $details\n";
     } else {
       die "State details must have the format \"ERLA\" (ethne religion language alphabet) on line $line\n";
     }
@@ -866,38 +881,34 @@ sub alphabet_loc {
 ############# DEMOGRAPHIC INFERENCE SUBROUTINES #############
 
 sub religion_ethne {
-  if (exists $ethne{$_[0]}[ETHNE_RELIGION]) {
-    if (exists $religion{$ethne{$_[0]}[ETHNE_RELIGION]}) {
-      return $ethne{$_[0]}[ETHNE_RELIGION];
-    } else {
-      die "$ethne{$_[0]}[ETHNE_RELIGION] is not a valid religion symbol in $ethne{$_[0]}[ETHNE_MASS].\n";
-    }
+  if (exists $ethne{$_[0]}) {
+    return substr $ethne{$_[0]}[ETHNE_DEMOGRAPHICS], 0, 1;
   } else {
-    die "$_[0] is not a valid ethne symbol.\n";
+    die "$_[0] is not a valid ethne symbol on line $line.\n";
   }
 }
 
 sub language_ethne {
-  if (exists $ethne{$_[0]}[ETHNE_LANGUAGE]) {
-    if (exists $language{$ethne{$_[0]}[ETHNE_LANGUAGE]}) {
-      return $ethne{$_[0]}[ETHNE_LANGUAGE];
-    } else {
-      die "$ethne{$_[0]}[ETHNE_LANGUAGE] is not a valid language symbol in $ethne{$_[0]}[ETHNE_MASS].\n";
-    }
+  if (exists $ethne{$_[0]}) {
+    return substr $ethne{$_[0]}[ETHNE_DEMOGRAPHICS], 1, 1;
   } else {
-    die "$_[0] is not a valid ethne symbol.\n";
+    die "$_[0] is not a valid ethne symbol on line $line.\n";
+  }
+}
+
+sub alphabet_ethne {
+  if (exists $ethne{$_[0]}) {
+    return substr $ethne{$_[0]}[ETHNE_DEMOGRAPHICS], 2, 1;
+  } else {
+    die "$_[0] is not a valid ethne symbol on line $line.\n";
   }
 }
 
 sub alphabet_language {
   if (exists $language{$_[0]}[LANGUAGE_ALPHABET]) {
-    if (exists $alphabet{$language{$_[0]}[LANGUAGE_ALPHABET]}) {
-      return $language{$_[0]}[LANGUAGE_ALPHABET];
-    } else {
-      die "$language{$_[0]}[LANGUAGE_ALPHABET] is not a valid language symbol in $language{$_[0]}[LANGUAGE_NAME].\n";
-    }
+    return $language{$_[0]}[LANGUAGE_ALPHABET];
   } else {
-    die "$_[0] is not a valid language symbol.\n";
+    die "$_[0] is not a valid language symbol on line $line.\n";
   }
 }
 
@@ -988,7 +999,7 @@ sub city {
   print $state[$state][STATE_NAME] . ".\n";
   foreach (@cities) {
     my ($r, $c) = (shift @$_, shift @$_);
-    print "$tile[$r][$c][SITE_NAME] ($tile[$r][$c][SITE_POPULATION] people):\n  $ethne{ethne_loc ($r, $c)}[ETHNE_MASS]\n  $religion{religion_loc ($r, $c)}[RELIGION_NAME]\n  $language{language_loc ($r, $c)}[LANGUAGE_NAME]\n  $alphabet{alphabet_loc ($r, $c)}[ALPHABET_NAME]\n";
+    print "$tile[$r][$c][SITE_NAME] ($tile[$r][$c][SITE_POPULATION] people):\n  $ethne{ethne_loc ($r, $c)}[ETHNE_PL]\n  $religion{religion_loc ($r, $c)}[RELIGION_NAME]\n  $language{language_loc ($r, $c)}[LANGUAGE_NAME]\n  $alphabet{alphabet_loc ($r, $c)}[ALPHABET_NAME]\n";
   }
 }
 
@@ -1212,29 +1223,23 @@ __DATA__
 #         1         2         3         4         5         6         7        
 #123456789012345678901234567890123456789012345678901234567890123456789012345678
 
-# ethnes
-# not finished
-w:Novgorodian:Novgorodians:Novgorodian:Novgorodians:O:w
-R:Kievan:Kievans:Kievan:Kievans:O:R
-!:Yugoslav:Yugoslavs:Yugoslavic:Yugoslavs:O:!
-|:Lechite:Lechites:Lechitic:Lechites:C:|
-W:Wend:Wends:Wendish:Wends:O:v
-z:Bohemian:Bohemians:Bohemian:Bohemians:C:z
-f:Frenchman:Frenchmen:French:French:C:f
-o:Occita
-J:Jew:Jews:Jewish:Jews:J:H
-
-# religions
-P:Protestantism:Protestant:Protestant:Protestants
-C:Roman Catholicism:Roman Catholic:Catholic:Catholics
-O:Eastern Orthodoxy:Eastern Orthodox:Orthodox Christian:Orthodox Christians
-J:Judaism:Jewish:Jew:Jews
-I:Islam:Muslim:Muslim:Muslims
+# writing systems
+L:Latin alphabet
+G:Greek alphabet
+g:Glagolitic alphabet
+C:Cyrillic alphabet
+A:Arabic alphabet
+H:Hebrew alphabet
+m:Gothic alphabet
+f:Elder Futhark
+F:Younger Futhark
+E:Futhorc
+~:Hungarian script
 
 # languages
 N:West Norse:F
 d:East Norse:F
-g:Gutnish:N
+g:Gutnish:F
 m:Crimean Gothic:m
 E:English:E
 I:Gaelic:L
@@ -1263,6 +1268,7 @@ _:Low German:L
 +:Prussian:L
 w:Novgorodian:C
 R:Russian:C
+v:Wendish:L
 |:Polish:L
 z:Bohemian:L
 !:Slavonic:C
@@ -1270,24 +1276,31 @@ G:Greek:G
 H:Hebrew:H
 ~:Hungarian:~
 
-# writing systems
-L:Latin alphabet
-G:Greek alphabet
-g:Glagolitic alphabet
-C:Cyrillic alphabet
-A:Arabic alphabet
-H:Hebrew alphabet
-m:Gothic alphabet
-f:Elder Futhark
-F:Younger Futhark
-E:Futhorc
-~:Hungarian script
+# religions
+P:Protestantism:Protestant:Protestant:Protestants
+C:Roman Catholicism:Roman Catholic:Catholic:Catholics
+O:Eastern Orthodoxy:Eastern Orthodox:Orthodox Christian:Orthodox Christians
+J:Judaism:Jewish:Jew:Jews
+I:Islam:Muslim:Muslim:Muslims
+
+# ethnes
+# not finished
+E:human:humans:human:P5f
+w:Novgorodian:Novgorodians:Novgorodian:Ow.
+R:Kievan:Kievans:Kievan:OR.
+!:Yugoslav:Yugoslavs:Yugoslavic:O!.
+|:Lechite:Lechites:Lechitic:C|.
+v:Wend:Wends:Wendish:Ov.
+z:Bohemian:Bohemians:Bohemian:Cz.
+f:Frenchman:Frenchmen:French:Cf.
+o:Occitanian:Occitanians:Occitan:Co.
+J:Jew:Jews:Jewish:JH.
 
 # countries
 N:Norway:Norwegian:p:l:ECN.
 w:Sweden:Swedish:p:l:ECd.
 d:Denmark:Danish:p:l:ECd.
-E:England:English:p:l:EC..
+E:England:English:p:l:E.H.
 o:Orkney:Orcadian:p:l:ECN.
 s:Scotland:Scottish:p:l:ECI.
 I:Ireland:Irish:p:l:ECI.
