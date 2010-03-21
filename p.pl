@@ -2,96 +2,105 @@
 
 use strict;
 use warnings;
+use List::Util qw/min max/;
 
 #$/ = "\r\n"; # for use at codepad.org only
 
 ############# CONSTANTS #############
 
-use constant SQRT2 => sqrt 2;
-use constant INVALID => "\n";
+use constant SQRT2       => sqrt 2;
+use constant INVALID     => "\n";
 use constant UNSPECIFIED => "";
 
 =pod
-use constant SHADE_SOLID => "Û";
-use constant SHADE_HIGH => "²";
+use constant SHADE_SOLID  => "Û";
+use constant SHADE_HIGH   => "²";
 use constant SHADE_MEDIUM => "±";
-use constant SHADE_LOW => "°";
+use constant SHADE_LOW    => "°";
 =cut
 #=pod
-use constant SHADE_SOLID => "#";
-use constant SHADE_HIGH => "*";
+use constant SHADE_SOLID  => "#";
+use constant SHADE_HIGH   => "*";
 use constant SHADE_MEDIUM => ".";
-use constant SHADE_LOW => "'";
+use constant SHADE_LOW    => "`";
 #=cut
 
-use constant PART_MAP => 0;
+use constant PART_MAP      => 0;
 use constant PART_ALPHABET => 1;
 use constant PART_LANGUAGE => 2;
 use constant PART_RELIGION => 3;
-use constant PART_ETHNE => 4;
-use constant PART_STATE => 5;
-use constant PART_CITY => 6;
+use constant PART_ETHNE    => 4;
+use constant PART_STATE    => 5;
+use constant PART_CITY     => 6;
 
-use constant DEMO_ETHNE => 0; # "demo" means "demographics"
+use constant DEMO_ETHNE    => 0; # "demo" means "demographics"
 use constant DEMO_RELIGION => 1;
 use constant DEMO_LANGUAGE => 2;
 use constant DEMO_ALPHABET => 3;
 
 use constant ALPHABET_PARAMETERS => 0;
-use constant ALPHABET_NAME => 0;
-use constant ORAL => ("oral tradition");
-use constant ORAL_SYMBOL => "0";
+use constant ALPHABET_NAME       => 0;
+use constant ORAL                => ("oral tradition");
+use constant ORAL_SYMBOL         => "0";
 
 use constant LANGUAGE_PARAMETERS => 1;
-use constant LANGUAGE_NAME => 0;
-use constant LANGUAGE_ALPHABET => 1;
-use constant GRUNTS => qw/grunts 0/;
-use constant GRUNTS_SYMBOL => "0";
+use constant LANGUAGE_NAME       => 0;
+use constant LANGUAGE_ALPHABET   => 1;
+use constant GRUNTS              => qw/grunts 0/;
+use constant GRUNTS_SYMBOL       => "0";
 
 use constant RELIGION_PARAMETERS => 3;
-use constant RELIGION_NAME => 0;
-use constant RELIGION_ADJ => 1;
-use constant RELIGION_SING => 2;
-use constant RELIGION_PL => 3;
-use constant ATHEISM => qw/atheism atheist atheist atheists/;
-use constant ATHEISM_SYMBOL => "0";
+use constant RELIGION_NAME       => 0;
+use constant RELIGION_ADJ        => 1;
+use constant RELIGION_SING       => 2;
+use constant RELIGION_PL         => 3;
+use constant ATHEISM             => qw/atheism atheist atheist atheists/;
+use constant ATHEISM_SYMBOL      => "0";
 
-use constant ETHNE_PARAMETERS => 3;
-use constant ETHNE_SING => 0;
-use constant ETHNE_PL => 1;
-use constant ETHNE_ADJ => 2;
+use constant ETHNE_PARAMETERS   => 3;
+use constant ETHNE_SING         => 0;
+use constant ETHNE_PL           => 1;
+use constant ETHNE_ADJ          => 2;
 use constant ETHNE_DEMOGRAPHICS => 3;
-use constant HERMIT => qw/hermit hermits eremetic 00./;
-use constant HERMIT_SYMBOL => "0";
+use constant HERMIT             => qw/hermit hermits eremetic 00./;
+use constant HERMIT_SYMBOL      => "0";
 
 use constant STATE_PARAMETERS => 5;
-use constant STATE_NAME => 0;
-use constant STATE_ADJ => 1;
-use constant STATE_POLITICS => 2;
-use constant STATE_LAWS => 3;
-use constant STATE_DETAILS => 4;
-use constant STATE_UNITS => 5;
-use constant OCEAN => ("water", "aquatic", (UNSPECIFIED) x 2);
-use constant OCEAN_SYMBOL => " ";
+use constant STATE_NAME       => 0;
+use constant STATE_ADJ        => 1;
+use constant STATE_POLITICS   => 2;
+use constant STATE_LAWS       => 3;
+use constant STATE_ETHNES     => 4;
+use constant STATE_UNITS      => 5;
+use constant OCEAN            => ("water", "aquatic", (UNSPECIFIED) x 2);
+use constant OCEAN_SYMBOL     => " ";
 
 use constant SITE_PARAMETERS => 4;
-use constant SITE_INPUT => 3;
-use constant SITE_STATE => 0;
-use constant SITE_NAME => 1;
-use constant SITE_DETAILS => 2;
+use constant SITE_INPUT      => 3;
+use constant SITE_STATE      => 0;
+use constant SITE_NAME       => 1;
+use constant SITE_ETHNES     => 2;
 use constant SITE_POPULATION => 3;
-use constant SITE_UNITS => 4;
+use constant SITE_UNITS      => 4;
 
-use constant UNIT_PARAMETERS => 8;
-use constant UNIT_STATE => 0;
-use constant UNIT_Y => 1;
-use constant UNIT_X => 2;
-use constant UNIT_SPEED => 3;
-use constant UNIT_MELEE => 4;
-use constant UNIT_RANGE => 5;
+use constant UNIT_PARAMETERS  => 8;
+use constant UNIT_STATE       => 0;
+use constant UNIT_Y           => 1;
+use constant UNIT_X           => 2;
+use constant UNIT_SPEED       => 3;
+use constant UNIT_MELEE       => 4;
+use constant UNIT_RANGE       => 5;
 use constant UNIT_OBJECTIVE_Y => 6;
 use constant UNIT_OBJECTIVE_X => 7;
-use constant UNIT_PLAN => 8;
+use constant UNIT_OBJECTIVE   => 8;
+use constant UNIT_PLAN        => 9;
+
+use constant OBJ_WANDER => 0;
+use constant OBJ_ATTACK => 1;
+
+use constant FOF_NEUTRAL    => 0;
+use constant FOF_SMOLDERING => 1;
+use constant FOF_BELLICOSE  => 2;
 
 ############# FORMATS #############
 
@@ -127,39 +136,30 @@ while (<DATA>) {
   next if ($_ =~ /^#/);
   if ($_ eq "") {
     $part++;
+    
+  ############# DEFAULT SITE INFORMATION #############
+    
     if ($part == PART_CITY) {
-      foreach my $r (0 .. $#tile) {
-        foreach my $c (0 .. $#{$tile[$r]}) {
-          $tile[$r][$c] = [index ($symbols, $tile[$r][$c]), (INVALID) x (SITE_PARAMETERS - 1)];
-          $tile[$r][$c][SITE_STATE] = 0 if ($tile[$r][$c][SITE_STATE] == -1);
-          $tile[$r][$c][SITE_POPULATION] = $tile[$r][$c][SITE_STATE] ? 5000 : 0;
-          $tile[$r][$c][SITE_UNITS] = ":";
+      foreach my $y (0 .. $#tile) {
+        foreach my $x (0 .. $#{$tile[$y]}) {
+          $tile[$y][$x] = [index ($symbols, $tile[$y][$x]), (INVALID) x (SITE_PARAMETERS - 1)];
+          $tile[$y][$x][SITE_STATE]      = 0 if ($tile[$y][$x][SITE_STATE] == -1);
+          $tile[$y][$x][SITE_POPULATION] = $tile[$y][$x][SITE_STATE] ? 5000 : 0;
+          $tile[$y][$x][SITE_UNITS]      = ":";
+#         $tile[$y][$x][SITE_ETHNES]     = "|1 z7"; print "($y,$x):" . state_code ($tile[$y][$x][SITE_STATE], STATE_ETHNES) . ":\n";
+          $tile[$y][$x][SITE_ETHNES]     = state_code ($tile[$y][$x][SITE_STATE], STATE_ETHNES);
         }
       }
     }
     next;
   }
   
+  ############# PARTS #############
+  
   if ($part == PART_MAP) {
     push @tile, [split //, $_];
-  } elsif ($part == PART_ALPHABET) {
-    my @alphabet = split /:/, $_;
-    my $alphabet = shift @alphabet;
-    die "Alphabet \"$alphabet\" must have the format \"symbol:name\" on line $line\n" if ($#alphabet != ALPHABET_PARAMETERS);
-    $alphabet{$alphabet} = [@alphabet];
-  } elsif ($part == PART_LANGUAGE) {
-    my @language = split /:/, $_;
-    my $language = shift @language;
-    die "Language \"$language\" must have the format \"symbol:name:alphabet\" on line $line\n" if ($#language != LANGUAGE_PARAMETERS);
-    die "Alphabet $language[LANGUAGE_ALPHABET] does not exist for the language $language[LANGUAGE_NAME] on line $line\n" unless (exists $alphabet{$language[LANGUAGE_ALPHABET]});
-    $language{$language} = [@language];
-  } elsif ($part == PART_RELIGION) {
-    my @religion = split /:/, $_;
-    my $religion = shift @religion;
-    die "Religion \"$religion\" must have the format \"symbol:name:adjective:singular:plural\" on line $line\n" if ($#religion != RELIGION_PARAMETERS);
-    $religion{$religion} = [@religion];
   } elsif ($part == PART_ETHNE) {
-    my @ethne = split /:/, $_;
+    my @ethne = split /\s*:\s*/, $_;
     my $ethne = shift @ethne;
     die "Ethne \"$ethne\" must have the format \"symbol:singular:plural:adjective:demographics\" on line $line\n" if ($#ethne != ETHNE_PARAMETERS);
     die "Demographics in ethne \"$ethne\" must have the format \"RLA\" on line $line\n" if ($ethne[ETHNE_DEMOGRAPHICS] !~ /(.)(.)(.)/);
@@ -170,66 +170,64 @@ while (<DATA>) {
     die "Language $language does not exist for the $ethne[ETHNE_PL] on line $line\n" unless (exists $language{$language});
     $alphabet = alphabet_language ($language) if ($alphabet eq ".");
     die "Alphabet $alphabet does not exist for the $ethne[ETHNE_PL] on line $line\n" unless (exists $alphabet{$alphabet});
+    $ethne[ETHNE_DEMOGRAPHICS] = "$religion$language$alphabet";
     $ethne{$ethne} = [@ethne];
+  } elsif ($part == PART_RELIGION) {
+    my @religion = split /\s*:\s*/, $_;
+    my $religion = shift @religion;
+    die "Religion \"$religion\" must have the format \"symbol:name:adjective:singular:plural\" on line $line\n" if ($#religion != RELIGION_PARAMETERS);
+    $religion{$religion} = [@religion];
+  } elsif ($part == PART_LANGUAGE) {
+    my @language = split /\s*:\s*/, $_;
+    my $language = shift @language;
+    die "Language \"$language\" must have the format \"symbol:name:alphabet\" on line $line\n" if ($#language != LANGUAGE_PARAMETERS);
+    die "Alphabet $language[LANGUAGE_ALPHABET] does not exist for the language $language[LANGUAGE_NAME] on line $line\n" unless (exists $alphabet{$language[LANGUAGE_ALPHABET]});
+    $language{$language} = [@language];
+  } elsif ($part == PART_ALPHABET) {
+    my @alphabet = split /\s*:\s*/, $_;
+    my $alphabet = shift @alphabet;
+    die "Alphabet \"$alphabet\" must have the format \"symbol:name\" on line $line\n" if ($#alphabet != ALPHABET_PARAMETERS);
+    $alphabet{$alphabet} = [@alphabet];
   } elsif ($part == PART_STATE) {
-    my @tmp = split /:/, $_, STATE_PARAMETERS + 2;
+    my @tmp = split /\s*:\s*/, $_, STATE_PARAMETERS + 2;
     my $symbol = shift @tmp;
     while ($#tmp <= STATE_PARAMETERS) {
       push @tmp, UNSPECIFIED;
     }
     $tmp[STATE_UNITS] = 0;
-    my $details = $tmp[STATE_DETAILS] eq UNSPECIFIED ? "...." : $tmp[STATE_DETAILS];
-    if ($details =~ /^(.)(.)(.)(.)$/) {
-      my $ethne = $1;
-      my $religion = $2;
-      my $language = $3;
-      my $alphabet = $4;
-      
-      $religion = religion_ethne ($ethne) if ($religion eq ".");
-      $language = language_ethne ($ethne) if ($language eq ".");
-      $alphabet = alphabet_language ($language) if ($alphabet eq ".");
-      $details = "$ethne$religion$language$alphabet";
-print "STATE $tmp[STATE_NAME]: $details\n";
-    } else {
-      die "State details must have the format \"ERLA\" (ethne religion language alphabet) on line $line\n";
+    
+    my @ethnes = split /\s+/, $tmp[STATE_ETHNES];
+    @ethnes = split //, $tmp[STATE_ETHNES] unless ($#ethnes);
+    foreach (@ethnes) {
+      die "Ethne $_ cannot exist in $tmp[STATE_NAME] on line $line\n" unless (exists $ethne{substr $_, 0, 1});
+      $_ .= "1" if (1 == length $_);
+      die "Ethne proportion " . substr ($_, 1) . " is not numeric but should be, on line $line\n" if (substr ($_, 1) == 0);
     }
-    $tmp[STATE_DETAILS] = $details;
+    $tmp[STATE_ETHNES] = join " ", @ethnes;
+    
     push @state, [@tmp[0 .. $#tmp]];
     $symbols .= $symbol;
   } elsif ($part == PART_CITY) {
-    my @tmp = split /:/, $_, SITE_PARAMETERS + 2;
+    my @tmp = split /\s*:\s*/, $_, SITE_PARAMETERS + 1;
     my ($y, $x) = (shift @tmp, shift @tmp);
     die "A city can't be in the water at ($y,$x) on line $line\n" if ($tile[$y][$x][SITE_STATE] == 0);
     while ($#tmp < SITE_INPUT) {
       push @tmp, UNSPECIFIED;
     }
     $tmp[SITE_POPULATION - 1] = 100_000;
-    $tmp[SITE_UNITS] = ":";
+    $tmp[SITE_UNITS - 1]      = ":";
     
-    my @details;
-    my $stateDetails = state_loc ($y, $x, STATE_DETAILS);
-    die state_loc ($y, $x, STATE_NAME) . " must provide details (for line $line)\n" if ($stateDetails eq UNSPECIFIED);
-    if ($tmp[SITE_DETAILS - 1] eq UNSPECIFIED) {
-      @details = split /\s+/, $stateDetails;
-    } else {
-      @details = split /\s+/, $tmp[SITE_DETAILS - 1];
+    my @ethnes = split /\s+/, $tmp[SITE_ETHNES - 1];
+    @ethnes = split //, $tmp[SITE_ETHNES - 1] unless ($#ethnes);
+    foreach (@ethnes) {
+      die "Ethne $_ cannot live in $tmp[SITE_NAME - 1] on line $line\n" unless (exists $ethne{substr $_, 0, 1});
+      $_ .= "1" if (1 == length $_);
+      die "Ethne proportion " . substr ($_, 1) . " is not numeric but should be, on line $line\n" if (substr ($_, 1) == 0);
     }
-    foreach (0 .. $#details) {
-      if ($details[$_] =~ /^(.)(.)(.)(.)$/) {
-        my $ethne = $1;
-        my $religion = $2;
-        my $language = $3;
-        my $alphabet = $4;
-        $ethne = substr $stateDetails, 0, 1 if ($ethne eq ".");
-        $religion = religion_ethne ($ethne) if ($religion eq ".");
-        $language = language_ethne ($ethne) if ($language eq ".");
-        $alphabet = alphabet_language ($language) if ($alphabet eq ".");
-        $details[$_] = "$ethne$religion$language$alphabet";
-      } else {
-        die "Site details must have the format \"ERLA\" (ethne religion language alphabet) on line $line\n";
-      }
+    $tmp[SITE_ETHNES - 1] = join " ", @ethnes;
+    if ($tmp[SITE_ETHNES - 1] eq UNSPECIFIED) {
+      $tmp[SITE_ETHNES - 1] = $state[$tile[$y][$x][SITE_STATE]][STATE_ETHNES];
     }
-    $tmp[SITE_DETAILS - 1] = join " ", @details;
       
     foreach (0 .. $#tmp) {
       $tile[$y][$x][$_ + 1] = $tmp[$_] unless ($tmp[$_] eq UNSPECIFIED);
@@ -239,12 +237,36 @@ print "STATE $tmp[STATE_NAME]: $details\n";
 
 ############# INITIAL DIPLOMATIC RELATIONS #############
 
-foreach (0 .. $#state) {
+foreach my $s1 (0 .. $#state) {
   my @o;
   foreach (0 .. $#state) {
     push @o, {};
   }
   push @opinion, [@o];
+  
+  next unless ($s1);
+  my $l1 = $state[$s1][STATE_LAWS];
+  foreach my $s2 (1 .. $#state) {
+    update ($s1, $s2);
+  }
+}
+
+my $toUpdate = "";
+
+sub update {
+  my ($s1, $s2) = (shift, shift);
+  return if ($s1 == $s2);
+  my ($l1, $l2) = (state_code ($s1, STATE_LAWS), state_code ($s2, STATE_LAWS));
+  $opinion[$s1][$s2]{"+l-"} = 0;
+  $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "+") && isLaw ($s2, "+") ?  5 : 0;
+  $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "+") && isLaw ($s2, "l") ?  0 : 0;
+  $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "+") && isLaw ($s2, "-") ? -3 : 0;
+  $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "l") && isLaw ($s2, "+") ?  2 : 0;
+# $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "l") && isLaw ($s2, "l") ?  0 : 0;
+# $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "l") && isLaw ($s2, "-") ?  0 : 0;
+  $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "+") ? -5 : 0;
+  $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "l") ?  3 : 0;
+  $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "-") ?  2 : 0;
 }
 
 ############# TESTING #############
@@ -301,32 +323,70 @@ my @plan = ("center S      The coordinates of the center of the country.",
             "d S           The diplomatic relations of one country.");
 
 #&map ();
-my @inputs = ("repeat 3 unit +", "repeat 3 unit R", "repeat 2 unit @", "repeat 2 unit E", "skip 5", "units");
+my @inputs = ("p 11 22");
 while (1) {
   $z = 0;
   
   ############# STATES #############
   
   foreach my $s1 (1 .. $#state) {
-    my $d1 = $state[$s1][STATE_DETAILS];
-#   print "\n" . state_symbol (substr ($symbols, $s1, 1), STATE_NAME) . ":\n";
+    update ($s1) if ($toUpdate =~ /,$s1,/);
+    $toUpdate =~ s/,$s1,/,/;
+    
+#   my $l1 = $state[$s1][STATE_LAWS];
     foreach my $s2 (1 .. $#state) {
-      next if ($s1 == $s2); # A state does not have diplomatic relations with itself.
-      my $d2 = $state[$s2][STATE_DETAILS];
-      $opinion[$s1][$s2]{"religion"} = substr ($d1, DEMO_RELIGION, 1) eq substr ($d2, DEMO_RELIGION, 1) ? 3 : -3;
-      $opinion[$s1][$s2]{"ethne"} = substr ($d1, DEMO_ETHNE, 1) eq substr ($d2, DEMO_ETHNE, 1) ? 0 : -1;
-      $opinion[$s1][$s2]{"language"} = substr ($d1, DEMO_LANGUAGE, 1) eq substr ($d2, DEMO_LANGUAGE, 1) ? 2 : 0;
+=pod
+      next if ($s1 == $s2);
+      my $l2 = $state[$s2][STATE_LAWS];
+#print substr ($symbols, $s1, 1) . "/" . substr ($symbols, $s2, 1) . ":\t$l1/$l2";
+      $opinion[$s1][$s2]{"+l-"} = 0;
+      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "+") && isLaw ($s2, "+") ?  5 : 0;
+      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "+") && isLaw ($s2, "l") ?  0 : 0;
+      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "+") && isLaw ($s2, "-") ? -3 : 0;
+      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "l") && isLaw ($s2, "+") ?  2 : 0;
+#     $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "l") && isLaw ($s2, "l") ?  0 : 0;
+#     $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "l") && isLaw ($s2, "-") ?  0 : 0;
+      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "+") ? -5 : 0;
+      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "l") ?  3 : 0;
+      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "-") ?  2 : 0;
+#print "\t$opinion[$s1][$s2]{\"+l-\"}\n";
+=cut
+      
+    ############# DECLARING WAR #############
+      
+      if (ambassador ($s2, $s1) == FOF_BELLICOSE || (relations ($s1, $s2) < 0 && threat ($s1, $s2) < 1)) {
+        war ($s1, $s2);
+      }
+    
+    ############# TAKING ACTION #############
+    
+      if (ambassador ($s1, $s2) == FOF_BELLICOSE) {
+        my @sites = sites_state (substr $symbols, $s1, 1);
+        my $rand = int rand $#sites;
+        my ($y, $x) = @{$sites[$rand]};
+        @sites = sites_state (substr $symbols, $s1, 1);
+        $rand = int rand $#sites;
+        my ($oy, $ox) = @{$sites[$rand]};
+        spawn ($y, $x, $s1, 100, 100, 100, $oy, $ox, OBJ_ATTACK);
+      }
     }
     
     ############# UNITS #############
     
     foreach (0 .. state_code ($s1, STATE_UNITS) - 1) {
-      my ($y, $x, $oy, $ox) = (unit_codeNumber ($s1, $_, UNIT_Y), unit_codeNumber ($s1, $_, UNIT_X), unit_codeNumber ($s1, $_, UNIT_OBJECTIVE_Y), unit_codeNumber ($s1, $_, UNIT_OBJECTIVE_X));
-      if (($y == $oy && $x == $ox) || unit_codeNumber ($s1, $_, UNIT_PLAN) eq INVALID) {
-        # already there or no hope of getting there
+      my ($y, $x, $oy, $ox, $obj) = (unit_codeNumber ($s1, $_, UNIT_Y), unit_codeNumber ($s1, $_, UNIT_X), unit_codeNumber ($s1, $_, UNIT_OBJECTIVE_Y), unit_codeNumber ($s1, $_, UNIT_OBJECTIVE_X), unit_codeNumber ($s1, $_, UNIT_OBJECTIVE));
+      if (($y == $oy && $x == $ox)) {
+      if ($obj eq OBJ_ATTACK && ambassador ($s1, $tile[$y][$x][SITE_STATE]) == FOF_BELLICOSE) {
+        $tile[$y][$x][SITE_POPULATION] = max 0, int $tile[$y][$x][SITE_POPULATION] * 2 / 3;
+        my $chance = 50;
+        $chance -= 40 if (city_loc ($y, $x));
+        transfer ($y, $x, $s1) if (chance ($chance));
+      }
+      } elsif (unit_codeNumber ($s1, $_, UNIT_PLAN) eq INVALID) {
+        # no hope of getting there
+        $unit{substr ($symbols, $s1, 1) . $_}[UNIT_PLAN] = UNSPECIFIED;
       } elsif (unit_codeNumber ($s1, $_, UNIT_PLAN) ne UNSPECIFIED) {
         my $step = pop @{$unit{substr ($symbols, $s1, 1) . $_}[UNIT_PLAN]};
-#print "step: (" . join (",", @{$step}) . ")\n";
         my ($py, $px) = (${$step}[0], ${$step}[1]);
         move (substr ($symbols, $s1, 1) . $_, $py, $px);
       } else {
@@ -349,19 +409,13 @@ while (1) {
     if (scalar foes ($s1, 0) > 3) {
 #      legislate ($s1, "D");
     }
-    
-    ############# TAKING ACTION #############
-    
-    if (isLaw ($s1, "D")) {
-      
-    }
   }
   
-=pod
   ############# WAR #############
   
-  foreach my $y (0 .. $#tile) {
-    foreach my $x (0 .. $#{$tile[$y]}) {
+=pod
+  foreach my $y (0 .. int ($#tile / 3)) {
+    foreach my $x (0 .. int ($#{$tile[$y]})) {
       my @environs;
       foreach my $dy (-1 .. 1) {
         foreach my $dx (-1 .. 1) {
@@ -372,8 +426,7 @@ while (1) {
       }
       foreach (@environs) {
         my ($ey, $ex) = ($$_[0], $$_[1]);
-#print "$ey,$ex: " . state_loc ($ey, $ex) . "\n";
-        if ($fof[$tile[$y][$x][SITE_STATE]][$tile[$ey][$ex][SITE_STATE]] == $FOF_W) {
+        if (ambassador ($tile[$y][$x][SITE_STATE], $tile[$ey][$ex][SITE_STATE]) == FOF_BELLICOSE) {
           my $chance = 50;
           $chance += 40 if (city_loc ($y, $x));
           $chance -= 40 if (city_loc ($ey, $ex));
@@ -383,7 +436,7 @@ while (1) {
     }
   }
 =cut
-    
+  
   ############# INPUT #############
   
 #  die unless (@inputs || $skip > 0); # codepad
@@ -424,6 +477,8 @@ while (1) {
     threatDoc ($1, $2);
   } elsif ($input =~ /^fof$/i) {
     fof ();
+  } elsif ($input =~ /^p (.)$/i) {
+    ethne_state ($1);
   } elsif ($input =~ /^o (.+) (.+)$/i) {
     o ($1, $2);
   } elsif ($input =~ /^unit (.+)$/i) {
@@ -507,6 +562,30 @@ sub foes {
   return @out;
 }
 
+sub ambassador {
+  my ($s1, $s2) = (shift, shift);
+  my $old = defined $fof[$s1][$s2] ? $fof[$s1][$s2] : FOF_NEUTRAL;
+  defined $_[0] ? my $f = shift : return $old;
+  $fof[$s1][$s2] = $f;
+  $fof[$s2][$s1] = $f;
+  return ($old != $fof[$s1][$s2]);
+}
+
+sub war {
+  my ($s1, $s2) = (shift, shift);
+  print &state_symbol (substr ($symbols, $s1, 1), STATE_NAME) . " has declared war on " . state_symbol (substr ($symbols, $s2, 1), STATE_NAME) . "!\n" if (ambassador ($s1, $s2, FOF_BELLICOSE) && (20 + $z));
+}
+
+sub transfer {
+  my ($y, $x, $state) = (shift, shift, shift);
+  if ($z) {
+    print &state_symbol (substr ($symbols, $state, 1), STATE_NAME) . " has taken ";
+    site_loc ($y, $x, SITE_NAME) ne INVALID ? print &site_loc ($y, $x, SITE_NAME) : print "some land";
+    print " from " . state_loc ($y, $x) . ".\n";
+  }
+  $tile[$y][$x][SITE_STATE] = $state;
+}
+
 ############# THREAT ANALYSIS SUBROUTINES #############
 
 sub threatDoc {
@@ -520,17 +599,18 @@ sub threatDoc {
     print "Invalid state: $them\n";
     return;
   }
-  threat ($usI, $themI);
+  print "*** TOP SECRET ***\n" . uc state_code ($usI, STATE_ADJ) . " THREAT ANALYSIS OF " . uc state_code ($themI, STATE_NAME) . "\n";
+  print "Amity/enmity:    " . relations ($usI, $themI) . "\n";
+  print "Border length:   " . internationalBorder ($usI, $themI) . "\n";
+  print "Total perimeter: " . perimeter ($themI) . "\n";
+  print "Area:            " . area ($themI) . "\n";
+  print "Population:      " . population ($themI) . "\n";
+  print "THREAT:          " . threat ($usI, $themI) . "\n";
 }
 
 sub threat {
   my ($us, $them) = (shift, shift);
-  print "*** TOP SECRET ***\n" . uc state_code ($us, STATE_ADJ) . " THREAT ANALYSIS OF " . uc state_code ($them, STATE_NAME) . "\n";
-  print "Amity/enmity:    " . relations ($us, $them) . "\n";
-  print "Border length:   " . internationalBorder ($us, $them) . "\n";
-  print "Total perimeter: " . perimeter ($them) . "\n";
-  print "Area:            " . area ($them) . "\n";
-  print "Population:      " . population ($them) . "\n";
+  return internationalBorder ($us, $them) / (area ($us) + 1) * population ($them) / (population ($us) + 1);
 }
 
 sub internationalBorder {
@@ -601,29 +681,6 @@ sub area {
 ############# OBSOLETE DIPLOMATIC SUBROUTINES #############
 
 =pod
-sub ambassador {
-  my ($s1, $s2, $f) = (shift, shift, shift);
-  my $old = $fof[$s1][$s2];
-  $fof[$s1][$s2] = $f;
-  $fof[$s2][$s1] = $f;
-  return ($old != $fof[$s1][$s2]);
-}
-
-sub make_war {
-  my ($s1, $s2) = (shift, shift);
-  print &state_symbol (substr ($symbols, $s1, 1), STATE_NAME) . " has declared war on " . state_symbol (substr ($symbols, $s2, 1), STATE_NAME) . "!\n" if (ambassador ($s1, $s2, $FOF_W) && $z);
-}
-
-sub transfer {
-  my ($y, $x, $state) = (shift, shift, shift);
-  if ($z) {
-    print &state_symbol (substr ($symbols, $state, 1), STATE_NAME) . " has taken ";
-    site_loc ($y, $x, SITE_NAME) ne INVALID ? print &site_loc ($y, $x, SITE_NAME) : print "some land";
-    print " from " . state_loc ($y, $x) . ".\n";
-  }
-  $tile[$y][$x][SITE_STATE] = $state;
-}
-
 sub list_fof {
   my ($state, $relationship) = (shift, shift);
   my @out;
@@ -647,6 +704,7 @@ sub legislate {
   unless (isLaw ($state, $law)) {
     $state[$state][STATE_LAWS] .= $law;
     print &state_symbol (substr $symbols, $state, 1) . " passes a new law.\n";
+    $toUpdate .= ",$state,";
   }
 }
 
@@ -663,7 +721,7 @@ sub state_code {
   $i = 0 unless (defined $i);
   die "Invalid code: $code\n" if ($code > length ($symbols));
   my $symbol = substr $symbols, $code, 1;
-  -1 == index ($symbols, $symbol) ? return INVALID : return $state[index ($symbols, $symbol)][$i];
+  -1 == index ($symbols, $symbol) ? return INVALID : defined $state[index ($symbols, $symbol)][$i] ? return $state[index ($symbols, $symbol)][$i] : return UNSPECIFIED;
 }
 
 sub code_symbol { # Is this subroutine downright useless?
@@ -837,45 +895,52 @@ sub city_loc {
 sub ethne_loc {
   my ($y, $x) = (shift, shift);
   return INVALID if ($y < 0 || $x < 0 || $y > $#tile || $x > $#{$tile[$y]});
-  my $details = $tile[$y][$x][SITE_DETAILS];
-  if ($details ne INVALID && $details =~ /^(.)/) {
-    return $1;
-  } else {
-    return UNSPECIFIED;
-  }
+  return $tile[$y][$x][SITE_ETHNES];
 }
 
 sub religion_loc {
   my ($y, $x) = (shift, shift);
   return INVALID if ($y < 0 || $x < 0 || $y > $#tile || $x > $#{$tile[$y]});
-  my $details = $tile[$y][$x][SITE_DETAILS];
-  if ($details ne INVALID && $details =~ /^.(.)/) {
-    return $1;
-  } else {
-    return UNSPECIFIED;
+  my @ethnes = split / /, $tile[$y][$x][SITE_ETHNES];
+  my %here;
+  foreach (@ethnes) {
+    $here{religion_ethne (substr $_, 0, 1)} += substr $_, 1;
   }
+  my @religion;
+  while (my ($key, $value) = each (%here)) {
+    push @religion, "$key$value";
+  }
+  return join " ", @religion;
 }
 
 sub language_loc {
   my ($y, $x) = (shift, shift);
   return INVALID if ($y < 0 || $x < 0 || $y > $#tile || $x > $#{$tile[$y]});
-  my $details = $tile[$y][$x][SITE_DETAILS];
-  if ($details ne INVALID && $details =~ /^..(.)/) {
-    return $1;
-  } else {
-    return UNSPECIFIED;
+  my @ethnes = split / /, $tile[$y][$x][SITE_ETHNES];
+  my %here;
+  foreach (@ethnes) {
+    $here{language_ethne (substr $_, 0, 1)} += substr $_, 1;
   }
+  my @language;
+  while (my ($key, $value) = each (%here)) {
+    push @language, "$key$value";
+  }
+  return join " ", @language;
 }
 
 sub alphabet_loc {
   my ($y, $x) = (shift, shift);
   return INVALID if ($y < 0 || $x < 0 || $y > $#tile || $x > $#{$tile[$y]});
-  my $details = $tile[$y][$x][SITE_DETAILS];
-  if ($details ne INVALID && $details =~ /^...(.)/) {
-    return $1;
-  } else {
-    return UNSPECIFIED;
+  my @ethnes = split / /, $tile[$y][$x][SITE_ETHNES];
+  my %here;
+  foreach (@ethnes) {
+    $here{alphabet_ethne (substr $_, 0, 1)} += substr $_, 1;
   }
+  my @alphabet;
+  while (my ($key, $value) = each (%here)) {
+    push @alphabet, "$key$value";
+  }
+  return join " ", @alphabet;
 }
 
 ############# DEMOGRAPHIC INFERENCE SUBROUTINES #############
@@ -910,6 +975,191 @@ sub alphabet_language {
   } else {
     die "$_[0] is not a valid language symbol on line $line.\n";
   }
+}
+
+############# GENERAL DEMOGRAPHICS SUBROUTINES #############
+
+sub pop_loc {
+  my ($y, $x, $total) = (shift, shift, 0);
+  my @ethnes = split / /, $tile[$y][$x][SITE_ETHNES];
+  return 0 unless (@ethnes);
+  foreach (@ethnes) {
+    $total += substr $_, 1;
+  }
+  return $total;
+}
+
+sub ethne_state {
+  return ethne_code (index $symbols, $_[0]);
+}
+
+sub religion_state {
+  return religion_code (index $symbols, $_[0]);
+}
+
+sub language_state {
+  return language_code (index $symbols, $_[0]);
+}
+
+sub alphabet_state {
+  return alphabet_code (index $symbols, $_[0]);
+}
+
+sub ethne_code {
+  my $code = shift;
+  my %ethnes;
+  foreach my $y (0 .. $#tile) {
+    foreach my $x (0 .. $#{$tile[$y]}) {
+      next unless (site_loc ($y, $x, SITE_STATE) == $code);
+      my %eth = ethnePop_loc ($y, $x);
+      while (my ($key, $value) = each (%eth)) {
+        $ethnes{$key} += $value;
+      }
+    }
+  }
+  while (my ($key, $value) = each (%ethnes)) {
+    print "$ethne{$key}[ETHNE_PL]: $value\n";
+  }
+  return %ethnes;
+}
+
+sub religion_code {
+  my $code = shift;
+  my %religions;
+  foreach my $y (0 .. $#tile) {
+    foreach my $x (0 .. $#{$tile[$y]}) {
+      next unless (site_loc ($y, $x, SITE_STATE) == $code);
+      my %rel = religionPop_loc ($y, $x);
+      while (my ($key, $value) = each (%rel)) {
+        $religions{$key} += $value;
+      }
+    }
+  }
+  return %religions;
+}
+
+sub language_code {
+  my $code = shift;
+  my %languages;
+  foreach my $y (0 .. $#tile) {
+    foreach my $x (0 .. $#{$tile[$y]}) {
+      next unless (site_loc ($y, $x, SITE_STATE) == $code);
+      my %lan = languagePop_loc ($y, $x);
+      while (my ($key, $value) = each (%lan)) {
+        $languages{$key} += $value;
+      }
+    }
+  }
+  return %languages;
+}
+
+sub alphabet_code {
+  my $code = shift;
+  my %alphabets;
+  foreach my $y (0 .. $#tile) {
+    foreach my $x (0 .. $#{$tile[$y]}) {
+      next unless (site_loc ($y, $x, SITE_STATE) == $code);
+      my %alp = alphabetPop_loc ($y, $x);
+      while (my ($key, $value) = each (%alp)) {
+        $alphabets{$key} += $value;
+      }
+    }
+  }
+  return %alphabets;
+}
+
+sub ethnePop_loc {
+  my ($y, $x) = (shift, shift);
+  return INVALID unless (valid_loc ($y, $x));
+  my @ethnes = split / /, $tile[$y][$x][SITE_ETHNES];
+  return INVALID unless (@ethnes);
+  my %eth;
+  foreach (@ethnes) {
+    my $eth = substr $_, 0, 1;
+    $eth{$eth} += site_loc ($y, $x, SITE_POPULATION) / pop_loc ($y, $x) * substr $_, 1;
+#    print "$ethne{$eth}[ETHNE_PL]: $eth{$eth} of " . site_loc ($y, $x, SITE_POPULATION) . "\n";
+  }
+  return %eth;
+}
+
+sub religionPop_loc {
+  my ($y, $x) = (shift, shift);
+  return INVALID unless (valid_loc ($y, $x));
+  my @ethnes = split / /, $tile[$y][$x][SITE_ETHNES];
+  return INVALID unless (@ethnes);
+  my %rel;
+  foreach (@ethnes) {
+    my $rel = religion_ethne (substr $_, 0, 1);
+    $rel{$rel} += site_loc ($y, $x, SITE_POPULATION) / pop_loc ($y, $x) * substr $_, 1;
+#    print "$religion{$rel}[RELIGION_NAME]: $rel{$rel} of " . site_loc ($y, $x, SITE_POPULATION) . "\n";
+  }
+  return %rel;
+}
+
+sub languagePop_loc {
+  my ($y, $x) = (shift, shift);
+  return INVALID unless (valid_loc ($y, $x));
+  my @ethnes = split / /, $tile[$y][$x][SITE_ETHNES];
+  return INVALID unless (@ethnes);
+  my %lan;
+  foreach (@ethnes) {
+    my $lan = language_ethne (substr $_, 0, 1);
+    $lan{$lan} += site_loc ($y, $x, SITE_POPULATION) / pop_loc ($y, $x) * substr $_, 1;
+#    print "$language{$lan}[LANGUAGE_NAME]: $lan{$lan} of " . site_loc ($y, $x, SITE_POPULATION) . "\n";
+  }
+  return %lan;
+}
+
+sub alphabetPop_loc {
+  my ($y, $x) = (shift, shift);
+  return INVALID unless (valid_loc ($y, $x));
+  my @ethnes = split / /, $tile[$y][$x][SITE_ETHNES];
+  return INVALID unless (@ethnes);
+  my %alp;
+  foreach (@ethnes) {
+    my $alp = alphabet_ethne (substr $_, 0, 1);
+    $alp{$alp} += site_loc ($y, $x, SITE_POPULATION) / pop_loc ($y, $x) * substr $_, 1;
+#    print "$alphabet{$alp}[ALPHABET_NAME]: $alp{$alp} of " . site_loc ($y, $x, SITE_POPULATION) . "\n";
+  }
+  return %alp;
+}
+
+############# DEMOGRAPHICS PRINTING SUBROUTINES #############
+
+sub print_ethnes {
+  my @ethnes = split / /, shift;
+  my @out;
+  foreach (@ethnes) {
+    push @out, $ethne{substr $_, 0, 1}[ETHNE_PL];
+  }
+  return join ", ", @out;
+}
+
+sub print_religions {
+  my @religions = split / /, shift;
+  my @out;
+  foreach (@religions) {
+    push @out, $religion{substr $_, 0, 1}[RELIGION_NAME];
+  }
+  return join ", ", @out;
+}
+
+sub print_languages {
+  my @languages = split / /, shift;
+  my @out;
+  foreach (@languages) {
+    push @out, $language{substr $_, 0, 1}[LANGUAGE_NAME];
+  }
+  return join ", ", @out;
+}
+
+sub print_alphabets {
+  my @alphabets = split / /, shift;
+  my @out;
+  foreach (@alphabets) {
+    push @out, $alphabet{substr $_, 0, 1}[ALPHABET_NAME];
+  }
+  return join ", ", @out;
 }
 
 ############# FEATURE SUBROUTINES #############
@@ -999,7 +1249,7 @@ sub city {
   print $state[$state][STATE_NAME] . ".\n";
   foreach (@cities) {
     my ($r, $c) = (shift @$_, shift @$_);
-    print "$tile[$r][$c][SITE_NAME] ($tile[$r][$c][SITE_POPULATION] people):\n  $ethne{ethne_loc ($r, $c)}[ETHNE_PL]\n  $religion{religion_loc ($r, $c)}[RELIGION_NAME]\n  $language{language_loc ($r, $c)}[LANGUAGE_NAME]\n  $alphabet{alphabet_loc ($r, $c)}[ALPHABET_NAME]\n";
+    print "$tile[$r][$c][SITE_NAME] ($tile[$r][$c][SITE_POPULATION] people):\n  " . print_ethnes (ethne_loc ($r, $c)) . "\n  " . print_religions (religion_loc ($r, $c)) . "\n  " . print_languages (language_loc ($r, $c)) . "\n  " . print_alphabets (alphabet_loc ($r, $c)) . "\n";
   }
 }
 
@@ -1165,11 +1415,11 @@ sub unit {
     print "Invalid state: $state\n";
     return;
   }
-  my @sites = sites_state ($state);
   print $state[$index][STATE_NAME] . " has created unit #$state[$index][STATE_UNITS]";
+  my @sites = sites_state ($state);
   my $rand = int rand $#sites;
   my ($y, $x) = @{$sites[$rand]};
-  spawn ($y, $x, $index);
+  spawn ($y, $x, $index, 100, 100, 100, int rand $#tile, int rand $#{$tile[0]}, OBJ_WANDER);
   print " at ($y,$x).\n";
 }
 
@@ -1177,7 +1427,7 @@ sub spawn {
   my ($y, $x, $index) = (shift, shift, shift);
   my $unitNumber = $state[$index][STATE_UNITS]++;
   my $state = substr $symbols, $index, 1;
-  $unit{"$state$unitNumber"} = [$index, $y, $x, 24, 22, 16, int rand $#tile, int rand $#{$tile[0]}, UNSPECIFIED];
+  $unit{"$state$unitNumber"} = [$index, $y, $x, shift, shift, shift, shift, shift, shift, UNSPECIFIED];
   $tile[$y][$x][SITE_UNITS] .= "$state$unitNumber:";
 }
   
@@ -1285,10 +1535,11 @@ I:Islam:Muslim:Muslim:Muslims
 
 # ethnes
 # not finished
-E:human:humans:human:P5f
+E:generic human:generic humans:generically human:P5f
 w:Novgorodian:Novgorodians:Novgorodian:Ow.
 R:Kievan:Kievans:Kievan:OR.
 !:Yugoslav:Yugoslavs:Yugoslavic:O!.
+c:Croatian:Croatians:Croatian:O!g
 |:Lechite:Lechites:Lechitic:C|.
 v:Wend:Wends:Wendish:Ov.
 z:Bohemian:Bohemians:Bohemian:Cz.
@@ -1297,40 +1548,40 @@ o:Occitanian:Occitanians:Occitan:Co.
 J:Jew:Jews:Jewish:JH.
 
 # countries
-N:Norway:Norwegian:p:l:ECN.
-w:Sweden:Swedish:p:l:ECd.
-d:Denmark:Danish:p:l:ECd.
-E:England:English:p:l:E.H.
-o:Orkney:Orcadian:p:l:ECN.
-s:Scotland:Scottish:p:l:ECI.
-I:Ireland:Irish:p:l:ECI.
-B:Brittany:Breton:p:l:ECB.
-f:France:French:p:l:ECf.
-n:Normandy:Norman:p:l:ECn.
-b:Burgundy:Burgundian:p:l:ECb.
-`:Sardinia:Sardinian:r:l:EC`.
-p:Pamplona:Pamplonese:p:l:EC4.
-l:Leon:Leonese:p:l:EC2.
-U:Caliphate of Cordova:Cordovan:p:l:EIAL
-A:Fatimid Caliphate:Moorish:p:l:EIA.
-y:Sicily:Sicilian:p:l:EIA.
-P:Papal States:Papal:p:l:ECL.
-V:Venice:Venetian:r:l:ECi.
-S:Salerno:Salernan:p:l:ECi.
-':Benevento:Beneventan:p:l:ECi.
-C:Capua:Capuan:p:l:ECi.
-a:Amalfi:Amalfian:p:l:ECi.
-":San Marino:Sanmarinese:r:l:ECi.
-+:Holy Roman Empire:German:p:l:EC^.
-|:Poland:Polish:p:l:EC|.
-~:Hungary:Magyar:p:l:EO~.
-T:State of the Teutonic Order:Pruthenic:p:l:EC+.
-R:Rus:Russian:p:l:EORg
-c:Croatia:Croatian:p:l:EO!g
-r:Serbia:Serbian:p:l:EO!.
-!:Bulgaria:Bulgarian:p:l:EO!.
-@:Byzantine Empire:Byzantine:p:l:EOG.
-m:Crimea:Crimean:p:l:EOm.
+N:Norway:Norwegian:p:+:E
+w:Sweden:Swedish:p:-:E
+d:Denmark:Danish:p:+:E
+E:England:English:p:+:E9 J
+o:Orkney:Orcadian:p:+:E
+s:Scotland:Scottish:p:-:E
+I:Ireland:Irish:p:l:E
+B:Brittany:Breton:p:+:E
+f:France:French:p:-:f
+n:Normandy:Norman:p:+:E
+b:Burgundy:Burgundian:p:l:f
+`:Sardinia:Sardinian:r:l:E
+p:Pamplona:Pamplonese:p:+:E
+l:Leon:Leonese:p:-:E
+U:Caliphate of Cordova:Cordovan:p:-:E
+A:Fatimid Caliphate:Moorish:p:l:E
+y:Sicily:Sicilian:p:l:E
+P:Papal States:Papal:p:+:E
+V:Venice:Venetian:r:+:E
+S:Salerno:Salernan:p:+:E
+':Benevento:Beneventan:p:+:E
+C:Capua:Capuan:p:+:E
+a:Amalfi:Amalfian:p:+:E
+":San Marino:Sanmarinese:r:+:E
++:Holy Roman Empire:German:p:+:E
+|:Poland:Polish:p:-:|
+~:Hungary:Magyar:p:-:E
+T:State of the Teutonic Order:Pruthenic:p:+:E
+R:Rus:Russian:p:-:R
+c:Croatia:Croatian:p:-:c
+r:Serbia:Serbian:p:+:c
+!:Bulgaria:Bulgarian:p:+:!
+@:Byzantine Empire:Byzantine:p:+:E
+m:Crimea:Crimean:p:+:E
 
 # Norway
 #
@@ -1343,9 +1594,9 @@ m:Crimea:Crimean:p:l:EOm.
 8:20:London
 6:18:Birmingham
 8:18:Bristol
-7:17:Caerleon:..W.
+7:17:Caerleon
 4:18:Newcastle
-6:20:York:J.E.
+6:20:York:z3 J f
 #
 # Orkney
 1:17:Kirkwall
@@ -1488,7 +1739,7 @@ m:Crimea:Crimean:p:l:EOm.
 #
 # Rus
 6:61:Kiev
-0:55:Novgorod
+0:55:Novgorod:w
 #
 # Croatia
 14:44:Biograd
