@@ -2,28 +2,21 @@
 
 use strict;
 use warnings;
-use List::Util qw/min max/;
+use FileHandle;
 
-#$/ = "\r\n"; # for use at codepad.org only
+use constant CODEPAD => 0;
+
+$/ = "\r\n" if (CODEPAD);
 
 ############# CONSTANTS #############
 
-use constant SQRT2       => sqrt 2;
 use constant INVALID     => "\n";
 use constant UNSPECIFIED => "";
 
-=pod
-use constant SHADE_SOLID  => "Û";
-use constant SHADE_HIGH   => "²";
-use constant SHADE_MEDIUM => "±";
-use constant SHADE_LOW    => "°";
-=cut
-#=pod
-use constant SHADE_SOLID  => "#";
-use constant SHADE_HIGH   => "*";
-use constant SHADE_MEDIUM => ".";
-use constant SHADE_LOW    => "`";
-#=cut
+use constant SHADE_SOLID  => substr "Û#", CODEPAD, 1;
+use constant SHADE_HIGH   => substr "²*", CODEPAD, 1;
+use constant SHADE_MEDIUM => substr "±.", CODEPAD, 1;
+use constant SHADE_LOW    => substr "°`", CODEPAD, 1;
 
 use constant PART_MAP      => 0;
 use constant PART_ALPHABET => 1;
@@ -33,7 +26,7 @@ use constant PART_ETHNE    => 4;
 use constant PART_STATE    => 5;
 use constant PART_CITY     => 6;
 
-use constant DEMO_ETHNE    => 0; # "demo" means "demographics"
+use constant DEMO_ETHNE    => 0; # "demo" is short for "demographics"
 use constant DEMO_RELIGION => 1;
 use constant DEMO_LANGUAGE => 2;
 use constant DEMO_ALPHABET => 3;
@@ -65,65 +58,93 @@ use constant ETHNE_DEMOGRAPHICS => 3;
 use constant HERMIT             => qw/hermit hermits eremetic 00./;
 use constant HERMIT_SYMBOL      => "0";
 
-use constant STATE_PARAMETERS => 5;
+use constant STATE_PARAMETERS => 9;
+use constant STATE_INPUT      => 6;
 use constant STATE_NAME       => 0;
 use constant STATE_ADJ        => 1;
 use constant STATE_POLITICS   => 2;
 use constant STATE_LAWS       => 3;
 use constant STATE_ETHNES     => 4;
-use constant STATE_UNITS      => 5;
-use constant OCEAN            => ("water", "aquatic", (UNSPECIFIED) x 2);
+use constant STATE_OFFENSE_A  => 5;
+use constant STATE_DEFENSE_A  => 6;
+use constant STATE_OFFENSE_N  => 7;
+use constant STATE_DEFENSE_N  => 8;
+use constant STATE_MONEY      => 9;
+use constant STATE_DEFAULT    => ((UNSPECIFIED) x 4, (1) x 5, 0);
+use constant OCEAN            => ("water", "aquatic", (UNSPECIFIED) x 2, (1) x 5, 0);
 use constant OCEAN_SYMBOL     => " ";
 
-use constant SITE_PARAMETERS => 4;
+use constant SITE_PARAMETERS => 3;
 use constant SITE_INPUT      => 3;
 use constant SITE_STATE      => 0;
 use constant SITE_NAME       => 1;
 use constant SITE_ETHNES     => 2;
 use constant SITE_POPULATION => 3;
-use constant SITE_UNITS      => 4;
-
-use constant UNIT_PARAMETERS  => 8;
-use constant UNIT_STATE       => 0;
-use constant UNIT_Y           => 1;
-use constant UNIT_X           => 2;
-use constant UNIT_SPEED       => 3;
-use constant UNIT_MELEE       => 4;
-use constant UNIT_RANGE       => 5;
-use constant UNIT_OBJECTIVE_Y => 6;
-use constant UNIT_OBJECTIVE_X => 7;
-use constant UNIT_OBJECTIVE   => 8;
-use constant UNIT_PLAN        => 9;
-
-use constant OBJ_WANDER => 0;
-use constant OBJ_ATTACK => 1;
+use constant SITE_DEFAULT    => ((UNSPECIFIED) x 3, 0);
 
 use constant FOF_NEUTRAL    => 0;
 use constant FOF_SMOLDERING => 1;
 use constant FOF_BELLICOSE  => 2;
+use constant FOF_ALLIED     => 3;
 
 ############# FORMATS #############
 
-my ($census_state, $census_pop);
-format CENSUS =
+my ($list_state, $list_pop);
+format LIST =
 @<<<<<<<<<<<<<<<<<<<<<<<<<<<    @>>>>>>>>>
-$census_state,                 $census_pop
+$list_state,                     $list_pop
 .
+
+############# SOMETHING TO LOOK AT DURING INITIALIZATION #############
+
+#         1         2         3         4         5         6         7        
+#123456789012345678901234567890123456789012345678901234567890123456789012345678
+print <<INTRO;
+                                                                               
+                                David Corbett's                                
+                                                                               
+                                     WORLD                                     
+                                                                               
+                                   SIMULATOR                                   
+                                                                               
+                          (New players: type "help".)                          
+                                                                               
+                                                                               
+This is a world simulator based somewhat on Machiavelli's "The Prince".        
+It is not finished. So far, all that can be done is watch the countries of     
+medieval Europe fight each other, and not too realistically either.            
+                                                                               
+There were originally supposed to be units moving around the world (like in    
+Civilization), but they slowed the program down too much so I took them out.   
+                                                                               
+The game is moddable, so you can create your own map, ethnic groups, religions,
+languages, alphabets, countries, and cities. For more information, see "mod" in
+the help files.                                                                
+                                                                               
+The HELP FILES can be accessed by typing "help" followed by the topic.         
+I.e. "help commands" lists available commands. "help topics" lists all topics. 
+                                                                               
+INTRO
 
 ############# VARIOUS VARIABLES #############
 
-my $z = my $skip = 0;
+my $turn = 0;
+my $passive = 0;
+my $ooc = 1;
+my $skip = 0;
 my $repeat = "";
 my $line = 0;
 my $part = 0;
 my @tile;
+my @tileCopy;
 my %ethne;
 my %religion;
 my %language;
 my %alphabet;
 my @state = [OCEAN];
 my $symbols = OCEAN_SYMBOL;
-my %unit;
+my %area;
+my %areaCopy;
 my @city;
 my @fof;     # outward diplomatic relations (i.e. "allied", "at war")
 my @opinion; # internal opinions as scalars (>0 = like; <0 = dislike)
@@ -145,9 +166,8 @@ while (<DATA>) {
           $tile[$y][$x] = [index ($symbols, $tile[$y][$x]), (INVALID) x (SITE_PARAMETERS - 1)];
           $tile[$y][$x][SITE_STATE]      = 0 if ($tile[$y][$x][SITE_STATE] == -1);
           $tile[$y][$x][SITE_POPULATION] = $tile[$y][$x][SITE_STATE] ? 5000 : 0;
-          $tile[$y][$x][SITE_UNITS]      = ":";
-#         $tile[$y][$x][SITE_ETHNES]     = "|1 z7"; print "($y,$x):" . state_code ($tile[$y][$x][SITE_STATE], STATE_ETHNES) . ":\n";
           $tile[$y][$x][SITE_ETHNES]     = state_code ($tile[$y][$x][SITE_STATE], STATE_ETHNES);
+#          $tileCopy[$y][x] = $tile[$y][$x];
         }
       }
     }
@@ -189,12 +209,11 @@ while (<DATA>) {
     die "Alphabet \"$alphabet\" must have the format \"symbol:name\" on line $line\n" if ($#alphabet != ALPHABET_PARAMETERS);
     $alphabet{$alphabet} = [@alphabet];
   } elsif ($part == PART_STATE) {
-    my @tmp = split /\s*:\s*/, $_, STATE_PARAMETERS + 2;
+    my @tmp = split /\s*:\s*/, $_, STATE_INPUT;
     my $symbol = shift @tmp;
-    while ($#tmp <= STATE_PARAMETERS) {
-      push @tmp, UNSPECIFIED;
+    while ($#tmp <= STATE_INPUT) {
+      push @tmp, (STATE_DEFAULT)[$#tmp];
     }
-    $tmp[STATE_UNITS] = 0;
     
     my @ethnes = split /\s+/, $tmp[STATE_ETHNES];
     @ethnes = split //, $tmp[STATE_ETHNES] unless ($#ethnes);
@@ -212,10 +231,9 @@ while (<DATA>) {
     my ($y, $x) = (shift @tmp, shift @tmp);
     die "A city can't be in the water at ($y,$x) on line $line\n" if ($tile[$y][$x][SITE_STATE] == 0);
     while ($#tmp < SITE_INPUT) {
-      push @tmp, UNSPECIFIED;
+      push @tmp, (SITE_DEFAULT)[$#tmp];
     }
     $tmp[SITE_POPULATION - 1] = 100_000;
-    $tmp[SITE_UNITS - 1]      = ":";
     
     my @ethnes = split /\s+/, $tmp[SITE_ETHNES - 1];
     @ethnes = split //, $tmp[SITE_ETHNES - 1] unless ($#ethnes);
@@ -255,6 +273,7 @@ my $toUpdate = "";
 
 sub update {
   my ($s1, $s2) = (shift, shift);
+#print "Updating $s1 ($s2)... ";
   return if ($s1 == $s2);
   my ($l1, $l2) = (state_code ($s1, STATE_LAWS), state_code ($s2, STATE_LAWS));
   $opinion[$s1][$s2]{"+l-"} = 0;
@@ -267,6 +286,7 @@ sub update {
   $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "+") ? -5 : 0;
   $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "l") ?  3 : 0;
   $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "-") ?  2 : 0;
+#print "$opinion[$s1][$s2]{\"+l-\"}\n";
 }
 
 ############# TESTING #############
@@ -302,173 +322,261 @@ print "\n";
 
 ############# RUNNING #############
 
-my @help = ("quit          Quit.",
-            "help          Help.",
-            "help [-w] foo Search for \"foo\" in the help files. -w: Whole words only.",
-            "map           The map.",
-            "map X         Highlight the country with the symbol X.",
-            "map ABC       Highlight the countries with the symbols A, B, and C.",
-            "cities        The map, showing cities.",
-            "info X        Information about a country.",
-            "census        Ordered list of states by population.",
-            "at y x        What is at and around (y,x)?",
-            "city X        List the cities of a country.",
-            "near X        The neighbors of a country.",
-            "fof           The diplomatic relations of all countries.",
-            "o A B         The diplomatic relations of two countries.",
-            "skip n        Skip n turns (equivalent to \"repeat zzz n\").",
-            "repeat n foo  Input \"foo\" for the next n turns.");
-my @plan = ("center S      The coordinates of the center of the country.",
-            "be S          Control a country.",
-            "d S           The diplomatic relations of one country.");
+#         1         2         3         4         5         6         7        
+#123456789012345678901234567890123456789012345678901234567890123456789012345678
+my %help =
+("" => <<_,
+To do anything in this game you have to type a command (q.v.) at the prompt.
+_
+
+"about" => <<ABOUT,
+This world simulator was created by David Corbett.
+ABOUT
+
+"command" => <<COMMAND,
+quit          Quit.
+help [foo]   *Help (about "foo").
+map           The map.
+map ABC       Highlight the countries with the symbols A, B, and C.
+city X        List the cities of a country.
+cities        The map, only showing cities.
+info X        Information about a country.
+census        Ordered list of states by population.
+size          Ordered list of states by area.
+at y x        What is at and around (y,x)?
+near X        The neighbors of a country.
+threat A B    A's threat analysis of B.
+fof           The diplomatic relations of all countries.
+date          The date in ISO 8601 format.
+o A B         The diplomatic relations of two countries.
+skip n        Skip n turns (equivalent to "repeat <zzz> n").
+repeat n foo  Input "foo" for the next n turns.
+[ENTER]       Does nothing.
+[AUGHT ELSE] *Does nothing.
+
+* Pauses the passage of time for that turn.
+COMMAND
+
+"date" => <<DATE,
+Each turn corresponds to a week. The game starts on 980-W01.
+DATE
+
+"fof" => <<FOF,
+Friend Or Foe.
+FOF
+
+"generic" => <<GENERIC,
+Ethnic groups are not finished yet, so most countries have a placeholder.
+Generic humans are Protestants, speak Galician, and use the Elder Futhark.
+
+... Why not?
+GENERIC
+
+"help" => <<HELP,
+Okay, okay; calm down. Just type "help" followed by your topic.
+HELP
+
+"info" => <<INFO,
+All you could ever want to know about a state.
+INFO
+
+"law" => <<LAW,
+Laws represent the laws, customs, practices and general zeitgeist of a state.
+At least, that's the plan; for now, there are only three laws: +, l, and -.
++ means it's good, l neutral, and - evil. They are arbitrarily assigned.
+LAW
+
+"map" => <<MAP,
+The map is represented by text, where spaces are the oceans and every other
+character represents a different country.
+
+The game world is a genericized version of Europe in c. AD 1000, but it's not
+meant to be accurate.
+MAP
+
+"mod" => <<MOD,
+You can mod a lot in this game. Just open the file p.pl that you ran to play
+this and go to the line that says __DATA__. Everything below that is moddable.
+
+Lines beginning with # are ignored. The seven sections are separated by single
+blank lines.
+
+The map is pretty self-explanatory. The numbers on the sides are to make
+coordinates easier, but they are converted into oceans before play begins.
+
+Writing systems are symbol:name
+Languages           symbol:name:alphabet
+Religions           symbol:name:person:people:adjective
+Ethnic groups       symbol:person:people:adjective:ReligionLanguageAlphabet
+                    If "Alphabet" is "." it uses the default from Language.
+States              symbol:name:adjective:?:laws:predominant ethnic group
+Cities              y-coordinate:x-coordinate:name[:local ethnic group(s)]
+MOD
+
+"nothing" => <<NOTHING,
+Cities, ethnicities, languages, religions, and alphabets do nothing... for now.
+NOTHING
+
+"quit" => <<QUIT,
+Self-explanatory: it quits the program. But why would you want to?
+QUIT
+
+"topic" => <<TOPIC,
+about
+command
+fof
+generic
+help
+info
+law
+map
+mod
+nothing
+quit
+topic
+war
+TOPIC
+
+"war" => <<WAR,
+Wars start when one country hates another and is confident that it can win.
+A state attacks neighboring states only. Wars never end. Little states
+currently have the advantage, so in the long run, all states will tend to have
+the same area.
+WAR
+);
+my %synonym = ("cmd"               => "command",
+               "commands"          => "command",
+               "generic human"     => "generic",
+               "generic humans"    => "generic",
+               "generically human" => "generic",
+               "me"                => "help",
+               "laws"              => "law",
+               "alphabet"          => "nothing",
+               "alphabets"         => "nothing",
+               "city"              => "nothing",
+               "cities"            => "nothing",
+               "ethne"             => "nothing",
+               "ethnes"            => "nothing",
+               "ethnic group"      => "nothing",
+               "ethnic groups"     => "nothing",
+               "language"          => "nothing",
+               "languages"         => "nothing",
+               "religion"          => "nothing",
+               "religions"         => "nothing",
+               "topics"            => "topic",
+               "wars"              => "war",
+               );
 
 #&map ();
-my @inputs = ("p 11 22");
+my @inputs = ("map", "skip 50", "map");
 while (1) {
-  $z = 0;
-  
+  unless ($ooc) {
+    
   ############# STATES #############
-  
-  foreach my $s1 (1 .. $#state) {
-    update ($s1) if ($toUpdate =~ /,$s1,/);
-    $toUpdate =~ s/,$s1,/,/;
     
-#   my $l1 = $state[$s1][STATE_LAWS];
-    foreach my $s2 (1 .. $#state) {
-=pod
-      next if ($s1 == $s2);
-      my $l2 = $state[$s2][STATE_LAWS];
-#print substr ($symbols, $s1, 1) . "/" . substr ($symbols, $s2, 1) . ":\t$l1/$l2";
-      $opinion[$s1][$s2]{"+l-"} = 0;
-      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "+") && isLaw ($s2, "+") ?  5 : 0;
-      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "+") && isLaw ($s2, "l") ?  0 : 0;
-      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "+") && isLaw ($s2, "-") ? -3 : 0;
-      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "l") && isLaw ($s2, "+") ?  2 : 0;
-#     $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "l") && isLaw ($s2, "l") ?  0 : 0;
-#     $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "l") && isLaw ($s2, "-") ?  0 : 0;
-      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "+") ? -5 : 0;
-      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "l") ?  3 : 0;
-      $opinion[$s1][$s2]{"+l-"} += isLaw ($s1, "-") && isLaw ($s2, "-") ?  2 : 0;
-#print "\t$opinion[$s1][$s2]{\"+l-\"}\n";
-=cut
+    foreach my $s1 (1 .. $#state) {
+      update ($s1) if ($toUpdate =~ /,$s1,/);
+      $toUpdate =~ s/,$s1,/,/;
       
-    ############# DECLARING WAR #############
-      
-      if (ambassador ($s2, $s1) == FOF_BELLICOSE || (relations ($s1, $s2) < 0 && threat ($s1, $s2) < 1)) {
-        war ($s1, $s2);
-      }
-    
+#     my $l1 = $state[$s1][STATE_LAWS];
+      foreach my $s2 (1 .. $#state) {
+        
     ############# TAKING ACTION #############
-    
-      if (ambassador ($s1, $s2) == FOF_BELLICOSE) {
-        my @sites = sites_state (substr $symbols, $s1, 1);
-        my $rand = int rand $#sites;
-        my ($y, $x) = @{$sites[$rand]};
-        @sites = sites_state (substr $symbols, $s1, 1);
-        $rand = int rand $#sites;
-        my ($oy, $ox) = @{$sites[$rand]};
-        spawn ($y, $x, $s1, 100, 100, 100, $oy, $ox, OBJ_ATTACK);
-      }
-    }
-    
-    ############# UNITS #############
-    
-    foreach (0 .. state_code ($s1, STATE_UNITS) - 1) {
-      my ($y, $x, $oy, $ox, $obj) = (unit_codeNumber ($s1, $_, UNIT_Y), unit_codeNumber ($s1, $_, UNIT_X), unit_codeNumber ($s1, $_, UNIT_OBJECTIVE_Y), unit_codeNumber ($s1, $_, UNIT_OBJECTIVE_X), unit_codeNumber ($s1, $_, UNIT_OBJECTIVE));
-      if (($y == $oy && $x == $ox)) {
-      if ($obj eq OBJ_ATTACK && ambassador ($s1, $tile[$y][$x][SITE_STATE]) == FOF_BELLICOSE) {
-        $tile[$y][$x][SITE_POPULATION] = max 0, int $tile[$y][$x][SITE_POPULATION] * 2 / 3;
-        my $chance = 50;
-        $chance -= 40 if (city_loc ($y, $x));
-        transfer ($y, $x, $s1) if (chance ($chance));
-      }
-      } elsif (unit_codeNumber ($s1, $_, UNIT_PLAN) eq INVALID) {
-        # no hope of getting there
-        $unit{substr ($symbols, $s1, 1) . $_}[UNIT_PLAN] = UNSPECIFIED;
-      } elsif (unit_codeNumber ($s1, $_, UNIT_PLAN) ne UNSPECIFIED) {
-        my $step = pop @{$unit{substr ($symbols, $s1, 1) . $_}[UNIT_PLAN]};
-        my ($py, $px) = (${$step}[0], ${$step}[1]);
-        move (substr ($symbols, $s1, 1) . $_, $py, $px);
-      } else {
-        # to be planned
-        $unit{substr ($symbols, $s1, 1) . $_}[UNIT_PLAN] = dijkstra ($y, $x, $oy, $ox);
-        if ($unit{substr ($symbols, $s1, 1) . $_}[UNIT_PLAN] eq INVALID) {
-#          print "You can't get there from here.\n";
-          $unit{substr ($symbols, $s1, 1) . $_}[UNIT_PLAN] = UNSPECIFIED;
-        } else {
-#print "PATH:\n";
-#foreach (@{$unit{substr ($symbols, $s1, 1) . $_}[UNIT_PLAN]}) {
-#  print "(" . join (",", @{$_}) . ")\n";
-#}
-        }
-      }
-    }
-    
-    ############# LEGISLATION #############
-    
-    if (scalar foes ($s1, 0) > 3) {
-#      legislate ($s1, "D");
-    }
-  }
   
-  ############# WAR #############
-  
-=pod
-  foreach my $y (0 .. int ($#tile / 3)) {
-    foreach my $x (0 .. int ($#{$tile[$y]})) {
-      my @environs;
-      foreach my $dy (-1 .. 1) {
-        foreach my $dx (-1 .. 1) {
-          next unless ($dy || $dx);
-          next unless (valid_loc ($y + $dy, $x + $dx));
-          push @environs, [$y + $dy, $x + $dx];
+        if (ambassador ($s2, $s1) == FOF_BELLICOSE || (relations ($s1, $s2) < 0 && threat ($s1, $s2) < 1)) {
+          print &state_symbol (substr ($symbols, $s1, 1), STATE_NAME) . " has declared war on " . state_symbol (substr ($symbols, $s2, 1), STATE_NAME) . "!\n" if (ambassador ($s1, $s2, FOF_BELLICOSE) && $passive);
+        }
+        if (relations ($s1, $s2) > 3 && relations ($s2, $s1) > 3) {
+          print &state_symbol (substr ($symbols, $s1, 1), STATE_NAME) . " and " . state_symbol (substr ($symbols, $s2, 1), STATE_NAME) . " have become allies.\n" if (ambassador ($s1, $s2, FOF_ALLIED) && $passive);
+        }
+        my $choice = int rand 3;
+        if ($choice == 0) {
+          
+        } elsif ($choice == 1) {
+          
+        } elsif ($choice == 2) {
+          
         }
       }
-      foreach (@environs) {
-        my ($ey, $ex) = ($$_[0], $$_[1]);
-        if (ambassador ($tile[$y][$x][SITE_STATE], $tile[$ey][$ex][SITE_STATE]) == FOF_BELLICOSE) {
-          my $chance = 50;
-          $chance += 40 if (city_loc ($y, $x));
-          $chance -= 40 if (city_loc ($ey, $ex));
-          transfer ($y, $x, site_loc ($ey, $ex, SITE_STATE)) if (chance ($chance));
+      
+      ############# LEGISLATION #############
+      
+      if (scalar foes ($s1, 0) > 3) {
+#        legislate ($s1, "D");
+      }
+    }
+    
+      ############# WAR #############
+    
+    @tileCopy = @tile;
+    %areaCopy = %area;
+    foreach my $y (0 .. int ($#tile)) {
+      foreach my $x (0 .. int ($#{$tile[$y]})) {
+        my @environs;
+        foreach my $dy (-1 .. 1) {
+          foreach my $dx (-1 .. 1) {
+            next unless ($dy || $dx);
+            next unless (valid_loc ($y + $dy, $x + $dx));
+            push @environs, [$y + $dy, $x + $dx];
+          }
+        }
+        foreach (@environs) {
+          my ($ey, $ex, $us) = ($$_[0], $$_[1], $tile[$y][$x][SITE_STATE]);
+          my $them = site_loc ($ey, $ex, SITE_STATE);
+          if (ambassador ($us, $them) == FOF_BELLICOSE) {
+            my $chance = (state_code ($us, STATE_OFFENSE_A) / area ($us)) / (state_code ($us, STATE_OFFENSE_A) / area ($us) + state_code ($them, STATE_DEFENSE_A) / area ($them));
+            transfer ($ey, $ex, $us) if (chance ($chance));
+          }
         }
       }
     }
+    @tile = @tileCopy;
+    %area = %areaCopy;
+    
+    $turn++;
   }
-=cut
   
   ############# INPUT #############
   
-#  die unless (@inputs || $skip > 0); # codepad
+  if (CODEPAD) {
+    die unless (@inputs || $skip > 0);
+  }
   print "$skip" if ($skip > 0);
   print ">";
-  my $input = ($skip > 0) ? $repeat : <>; # home
-#  my $input = ($skip > 0) ? $repeat : shift @inputs; # codepad
+  my $input;
+  unless (CODEPAD) {
+    $input = ($skip > 0) ? $repeat : <>;
+  } else {
+    $input = ($skip > 0) ? $repeat : shift @inputs;
+  }
   $input = INVALID unless (defined $input);
-  print "$input\n" if ($skip > 0);
-#  print "\n" if ($skip > 0);
+  print "$input\n" if ($skip > 0 || CODEPAD);
   
   $skip--;
   chomp $input;
   $input =~ s/\s+/ /g;
   $input =~ s/^ //g;
   $input =~ s/ $//g;
-  if ($input =~ /^((q(uit)?)|cls|exit)$/i) {
+  $passive = 0;
+  $ooc = 0;
+  if ($input =~ /^((qq?(uit)?)|cls|exit)$/i) {
     last;
   } elsif ($input =~ /^h(elp)?( (.+))?$/i) {
+    $ooc = 1;
     help ($3);
   } elsif ($input =~ /^map( (.+))?$/i) {
     &map ($2);
   } elsif ($input =~ /^cities$/i) {
     cities ();
-  } elsif ($input =~ /^units$/i) {
-    units ();
   } elsif ($input =~ /^city (.*)$/i) {
+    $ooc = 1;
     city ($1);
   } elsif ($input =~ /^info (.*)$/i) {
     info ($1);
   } elsif ($input =~ /^census$/i) {
     census ();
+  } elsif ($input =~ /^size$/i) {
+    size ();
   } elsif ($input =~ /^at (\d+) (\d+)$/i) {
     at ($1, $2);
   } elsif ($input =~ /^near (.*)$/i) {
@@ -477,22 +585,23 @@ while (1) {
     threatDoc ($1, $2);
   } elsif ($input =~ /^fof$/i) {
     fof ();
+  } elsif ($input =~ /^date$/i) {
+    $ooc = 1;
+    date ();
   } elsif ($input =~ /^p (.)$/i) {
-    ethne_state ($1);
+    power ($1);
   } elsif ($input =~ /^o (.+) (.+)$/i) {
     o ($1, $2);
-  } elsif ($input =~ /^unit (.+)$/i) {
-    unit ($1);
-  } elsif ($input =~ /^bio (.)(\d+)$/i) {
-    bio ($1, $2);
   } elsif ($input =~ /^skip (\d+)$/i) {
     $skip = $1;
     $repeat = "";
   } elsif ($input =~ /^repeat (\d+) (.+)$/i) {
     $skip = $1;
     $repeat = $2;
+  } elsif ($input =~ /^$/) {
+    $passive = 1;
   } else {
-    $z = 1;
+    $ooc = 1;
   }
 }
 
@@ -571,19 +680,16 @@ sub ambassador {
   return ($old != $fof[$s1][$s2]);
 }
 
-sub war {
-  my ($s1, $s2) = (shift, shift);
-  print &state_symbol (substr ($symbols, $s1, 1), STATE_NAME) . " has declared war on " . state_symbol (substr ($symbols, $s2, 1), STATE_NAME) . "!\n" if (ambassador ($s1, $s2, FOF_BELLICOSE) && (20 + $z));
-}
-
 sub transfer {
-  my ($y, $x, $state) = (shift, shift, shift);
-  if ($z) {
-    print &state_symbol (substr ($symbols, $state, 1), STATE_NAME) . " has taken ";
+  my ($y, $x, $conq) = (shift, shift, shift);
+  if ($passive) {
+    print &state_code ($conq, STATE_NAME) . " has taken ";
     site_loc ($y, $x, SITE_NAME) ne INVALID ? print &site_loc ($y, $x, SITE_NAME) : print "some land";
-    print " from " . state_loc ($y, $x) . ".\n";
+    print " from " . state_loc ($y, $x, STATE_NAME) . ".\n";
   }
-  $tile[$y][$x][SITE_STATE] = $state;
+  $areaCopy{$tile[$y][$x][SITE_STATE]}--;
+  $tileCopy[$y][$x][SITE_STATE] = $conq;
+  $areaCopy{$conq}++;
 }
 
 ############# THREAT ANALYSIS SUBROUTINES #############
@@ -665,6 +771,7 @@ sub counterclockwise {
 
 sub area {
   my $state = shift;
+  return $area{$state} if (defined $area{$state});
   if ($state > length $symbols) {
     print "Invalid state: $state\n";
     return;
@@ -675,6 +782,8 @@ sub area {
       $area++ if (code_loc ($y, $x) == $state);
     }
   }
+  $area{$state} = $area;
+  $areaCopy{$state} = $area;
   return $area;
 }
 
@@ -696,7 +805,7 @@ sub list_fof {
 sub isLaw {
   my ($state, $law) = (shift, shift);
   my $reLaw = escape ($law);
-  return ($state[$state][STATE_LAWS] =~ /$reLaw/);
+  return (state_code ($state, STATE_LAWS) =~ /$reLaw/);
 }
 
 sub legislate {
@@ -727,101 +836,6 @@ sub state_code {
 sub code_symbol { # Is this subroutine downright useless?
   my $symbol = shift;
   -1 == index ($symbols, $symbol) ? return -1 : return index ($symbols, $symbol);
-}
-
-############# UNIT SUBROUTINES #############
-
-sub unit_id {
-  my $id = shift;
-  return INVALID unless (exists $unit{$id});
-  my $i = shift;
-  return $unit{$id}[$i];
-}
-
-sub unit_codeNumber {
-  my $id = substr ($symbols, shift, 1) . shift;
-  return INVALID unless (exists $unit{$id});
-  my $i = shift;
-  return $unit{$id}[$i];
-}
-
-sub dijkstra { # about 9.5 Hz on average
-  my @grid;
-  foreach my $y (0 .. $#tile) {
-    my @row;
-    foreach my $x (0 .. $#{$tile[$y]}) {
-      push @row, UNSPECIFIED;
-    }
-    push @grid, [@row];
-  }
-  my ($y, $x, $oy, $ox) = (shift, shift, shift, shift);
-  $grid[$y][$x] = 0;
-  my @stack = ([$y, $x]);
-  while (@stack) {
-    my $coords = shift @stack;
-    my ($y, $x) = (${$coords}[0], ${$coords}[1]);
-    foreach my $dy (-1 .. 1) {
-      foreach my $dx (-1 .. 1) {
-        next unless ($dy || $dx);
-        if (valid_loc ($y + $dy, $x + $dx) && $tile[$y + $dy][$x + $dx][SITE_STATE]) { # i.e. not water
-          my $dirFactor = $dy && $dx ? SQRT2 : 1;
-          my $dist = $grid[$y][$x] + $dirFactor;
-          if ($grid[$y + $dy][$x + $dx] eq UNSPECIFIED || $grid[$y + $dy][$x + $dx] > $dist) {
-            $grid[$y + $dy][$x + $dx] = $dist;
-            push @stack, [$y + $dy, $x + $dx];
-          }
-        }
-      }
-    }
-  }
-  
-=pod
-  foreach $y (0 .. $#grid) {
-    foreach $x (0 .. $#{$grid[$y]}) {
-      $grid[$y][$x] eq UNSPECIFIED ? print "        -" : printf "%08s-", int ($grid[$y][$x] * 100) / 100;
-    }
-    print "\n";
-  }
-=cut
-  
-  return INVALID if ($grid[$oy][$ox] eq UNSPECIFIED);
-  
-  my @path;
-  my $point = [$oy, $ox];
-  while (${$point}[0] != $y || ${$point}[1] != $x) {
-    my ($py, $px) = @{$point};
-    my $min = $grid[$py][$px];
-    foreach my $dy (-1 .. 1) {
-      foreach my $dx (-1 .. 1) {
-        next unless ($dy || $dx);
-        if ($grid[$py + $dy][$px + $dx] ne UNSPECIFIED && $grid[$py + $dy][$px + $dx] < $min) {
-          $min = $grid[$py + $dy][$px + $dx];
-          $point = [$py + $dy, $px + $dx];
-        }
-      }
-    }
-    push @path, $point;
-  }
-  pop @path;
-  unshift @path, [$oy, $ox];
-=pod
-  print "BEGIN\n";
-  foreach (@path) {
-    print "(" . join (",", @{$_}) . ")\n";
-  }
-  print "END\n";
-=cut
-  return [@path];
-}
-
-sub move {
-  my ($id, $py, $px) = (shift, shift, shift);
-  my ($y, $x) = ($unit{$id}[UNIT_Y], $unit{$id}[UNIT_X]);
-  $unit{$id}[UNIT_Y] = $py;
-  $unit{$id}[UNIT_X] = $px;
-  $tile[$py][$px][SITE_UNITS] .= "$id:";
-  $id = escape ($id);
-  $tile[$y][$x][SITE_UNITS] =~ s/$id://;
 }
 
 ############# SUBROUTINES GIVEN A LOCATION OR STATE #############
@@ -1165,35 +1179,14 @@ sub print_alphabets {
 ############# FEATURE SUBROUTINES #############
 
 sub help {
-  my $subject;
-  if (defined $_[0]) {
-    my @args = split / /, shift;
-    my $args = ($args[0] =~ /^-/) ? shift @args : "";
-    $subject = join " ", @args;
-    $b = ($args =~ /w/) ? "\\b" : "";
+  my $subject = defined $_[0] ? lc shift : UNSPECIFIED;
+  if (exists $help{$subject}) {
+    print $help{$subject};
+  } elsif (exists $synonym{$subject} && exists $help{$synonym{$subject}}) {
+    print $help{$synonym{$subject}};
   } else {
-    $subject = undef;
-    $b = "";
+    print "No help is available on that topic.\n";
   }
-  $subject = escape ($subject);
-  
-  my $found = 0;
-  foreach (@help) {
-    if (!defined $subject || $_ =~ /$b$subject$b/i) {
-      print "$_\n";
-      $found = 1;
-    }
-  }
-  my $plan = 0;
-  foreach (@plan) {
-    if (!defined $subject || $_ =~ /$b$subject$b/i) {
-      print "\n" if ($found && !$plan);
-      print "Planned features:\n" unless ($plan++);
-      print "$_\n";
-      $found = 1;
-    }
-  }
-  print "No matches found.\n" unless ($found);
 }
 
 sub map {
@@ -1232,25 +1225,16 @@ sub cities {
   }
 }
 
-sub units {
-  foreach my $r (0 .. $#tile) {
-    foreach my $c (0 .. $#{$tile[$r]}) {
-      $tile[$r][$c][SITE_UNITS] ne ":" ? print substr $tile[$r][$c][SITE_UNITS], 1, 1 : $tile[$r][$c][SITE_STATE] == 0 ? print OCEAN_SYMBOL : print SHADE_MEDIUM;
-    }
-    print "\n";
-  }
-}
-
 sub city {
   my $state = index $symbols, shift;
   return if ($state eq -1);
   my @cities = city_get ($state);
-  @cities == 1 ? print "There is only one city in " : print "There are " . @cities . " cities in ";
-  print $state[$state][STATE_NAME] . ".\n";
   foreach (@cities) {
     my ($r, $c) = (shift @$_, shift @$_);
     print "$tile[$r][$c][SITE_NAME] ($tile[$r][$c][SITE_POPULATION] people):\n  " . print_ethnes (ethne_loc ($r, $c)) . "\n  " . print_religions (religion_loc ($r, $c)) . "\n  " . print_languages (language_loc ($r, $c)) . "\n  " . print_alphabets (alphabet_loc ($r, $c)) . "\n";
   }
+  @cities == 1 ? print "There is only one city in " : print "There are " . scalar @cities . " cities in ";
+  print &state_code ($state, STATE_NAME) . ".\n";
 }
 
 sub city_get {
@@ -1295,9 +1279,10 @@ sub info {
     print "Invalid state: $state\n";
     return;
   }
-  foreach my $i (0 .. STATE_PARAMETERS) {
-    print (("Name\t\t", "Adj.\t\t", "Political system", "Laws\t\t", "Demographics\t", "Units\t\t")[$i] . ": " . state_symbol ($state, $i) . "\n") if (state_symbol ($state, $i) ne UNSPECIFIED);
+  foreach my $i (0 .. STATE_PARAMETERS - 5) {
+    print (("Name\t\t", "Adj.\t\t", "Political system", "Laws\t\t", "Ethnes\t\t")[$i] . ": " . state_symbol ($state, $i) . "\n") if (state_symbol ($state, $i) ne UNSPECIFIED);
   }
+  print "Size\t\t: " . area (index ($symbols, $state)) . "\n";
   print "Population\t: " . population (index ($symbols, $state)) . "\n";
   
 =pod
@@ -1330,14 +1315,28 @@ sub info {
 }
 
 sub census {
-  STDOUT->format_name ("CENSUS");
+  STDOUT->format_name ("LIST");
   my %census;
-  foreach (1 .. length $symbols) {
+  foreach (0 .. length $symbols) {
     $census{state_code ($_, STATE_NAME)} = population ($_);
   }
   foreach (sort {$census{$a} <=> $census{$b}} (keys (%census))) {
-    $census_state = $_;
-    $census_pop = $census{$_};
+    $list_state = $_;
+    $list_pop = $census{$_};
+    write STDOUT;
+  }
+  STDOUT->format_name ("STDOUT");
+}
+
+sub size {
+  STDOUT->format_name ("LIST");
+  my %size;
+  foreach (0 .. length $symbols) {
+    $size{state_code ($_, STATE_NAME)} = area ($_);
+  }
+  foreach (sort {$size{$a} <=> $size{$b}} (keys (%size))) {
+    $list_state = $_;
+    $list_pop = $size{$_};
     write STDOUT;
   }
   STDOUT->format_name ("STDOUT");
@@ -1361,7 +1360,6 @@ sub at {
           at ($y + $dy, $x + $dx, "The existence of this string prevents infinite recursion.");
         }
       }
-      print "Units: $tile[$y][$x][SITE_UNITS]\n" if (1 < length $tile[$y][$x][SITE_UNITS]);
     }
   } else {
     defined $_[0] ? print "???\n" : print "Off the map.\n";
@@ -1389,6 +1387,10 @@ sub fof {
   }
 }
 
+sub date {
+  print ((980 + int $turn / 52) . "-W" . sprintf ("%02d", (1 + int $turn % 52)) . "\n");
+}
+
 sub o {
   my ($s1, $s2) = (shift, shift);
   my ($i1, $i2) = (index ($symbols, $s1), index ($symbols, $s2));
@@ -1408,50 +1410,25 @@ sub o {
   relations ($i2, $i1, 1);
 }
 
-sub unit {
-  my $state = shift;
-  my $index = index $symbols, $state;
-  if ($index <= 0 || length $state > 1) {
-    print "Invalid state: $state\n";
+sub power {
+  my $s = shift;
+  my $i = index $symbols, $s;
+  if ($i <= 0 || length $s > 1) {
+    print "Invalid state: $s\n";
     return;
   }
-  print $state[$index][STATE_NAME] . " has created unit #$state[$index][STATE_UNITS]";
-  my @sites = sites_state ($state);
-  my $rand = int rand $#sites;
-  my ($y, $x) = @{$sites[$rand]};
-  spawn ($y, $x, $index, 100, 100, 100, int rand $#tile, int rand $#{$tile[0]}, OBJ_WANDER);
-  print " at ($y,$x).\n";
-}
-
-sub spawn {
-  my ($y, $x, $index) = (shift, shift, shift);
-  my $unitNumber = $state[$index][STATE_UNITS]++;
-  my $state = substr $symbols, $index, 1;
-  $unit{"$state$unitNumber"} = [$index, $y, $x, shift, shift, shift, shift, shift, shift, UNSPECIFIED];
-  $tile[$y][$x][SITE_UNITS] .= "$state$unitNumber:";
-}
-  
-sub bio {
-  my ($state, $unitNumber) = (shift, shift);
-  unless (exists $unit{"$state$unitNumber"}) {
-    print "Unit $state$unitNumber does not exist.\n";
-    return;
-  }
-  print "State\t\t: " . state_code (unit_id ("$state$unitNumber", UNIT_STATE), STATE_NAME) . "\n";
-  foreach my $i (1 .. UNIT_PARAMETERS) {
-    print (("", "Y\t\t", "X\t\t", "Speed\t\t", "Melee power\t", "Ranged power\t", "Objective Y\t", "Objective X\t", "Plan steps:\t")[$i] . ": " . unit_id ("$state$unitNumber", $i) . "\n") if (unit_id ("$state$unitNumber", $i) ne UNSPECIFIED);
-  }
+  print ((area ($i) / state_code ($i, STATE_OFFENSE_A)) . "\n");
 }
 
 __DATA__
 #         1         2         3         4         5         6         7        
 #123456789012345678901234567890123456789012345678901234567890123456789012345678
-0                  o        NNN  Nwwwww  T   TT TTTRRRRRRRRRRRRRRRRRRRRRRRRRRRR
-1               oo           N    Nwwww      TTTTTRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
-2             sssss            dd  dddd       TTTRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
-3              sss             dd   dd       TTTTRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
-4              sssE             d d     +||TTTTTTRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
-5         IIII   ssE            +++++++++||||||||RRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+0                  o        NNN  Nwwwww  t   tt tttRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+1               oo           N    Nwwww      tttttRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+2             sssss            dd  dddd       tttRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+3              sss             dd   dd       ttttRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+4              sssE             d d     +||ttttttRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+5          III   ssE            +++++++++||||||||RRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
 6         IIII E  EEE        ++++++++++||||||||||RRRRRRRRRRRRRRRRRRRRRR  RRRRRR
 7        IIII    EEEEEE    ++++++++++++|||||||||||RRRRRRRRRRRRRRRRRRRR   RRRRRR
 8                 EEEEE    ++++++++++++++||||||||~~~~~~RRRRRRRRR mmm    RRRRRRR
@@ -1459,11 +1436,11 @@ __DATA__
 0                  nnnnffff+++++++++++++++++~~~~~~~~~~~~~RRRRR!                
 1              BBBBfffffffff+++++++++++++++~~~~~~~~~~~~~~RRRR!                 
 2                BBfffffffffbbb++++++++++++~~~~~~~~~~RRRRRRR!!                 
-3                  fffffffffbbbb+++++"+V Vccccccc!!!!!!!!!!!!!          @@@@@@@
-4                   fffffffbbbbb++++++P    Vccrrrrr!!!!!!!!!@@@       @@@@@@@@@
+3                  fffffffffbbbb+++++"+V VCCCCCCC!!!!!!!!!!!!!          @@@@@@@
+4                   fffffffbbbbb++++++P    VCCrrrrr!!!!!!!!!@@@       @@@@@@@@@
 5                   fffffffbbbb+++  +++P      rrrVrr!!!!!!@@@@  @@@@@@@@@@@@@@@
 6       lllllll    ffffffffbbbb      +++P''        r!!!!@@     @@@@@@@@@@@@@@@@
-7       lllllllllpppppffff        ++    PCa@@@@@@  @!!!!      @@@@@@@@@@@@@@@@@
+7       lllllllllpppppffff        ++    Pca@@@@@@  @!!!!      @@@@@@@@@@@@@@@@@
 8       lllllllllUUUUUUUf                   SS@  @   @@@@@     @@@@@@@@@@@@@@@@
 9       UUUUUUUUUUUUUU             `          @@       @@@@     @@@@@   @@@@   
 0      UUUUUUUUUUUUUU    U         `     yyyy  @      @@@@                   @ 
@@ -1535,7 +1512,7 @@ I:Islam:Muslim:Muslim:Muslims
 
 # ethnes
 # not finished
-E:generic human:generic humans:generically human:P5f
+E:generic human:generic humans:generically human:P1f
 w:Novgorodian:Novgorodians:Novgorodian:Ow.
 R:Kievan:Kievans:Kievan:OR.
 !:Yugoslav:Yugoslavs:Yugoslavic:O!.
@@ -1553,31 +1530,31 @@ w:Sweden:Swedish:p:-:E
 d:Denmark:Danish:p:+:E
 E:England:English:p:+:E9 J
 o:Orkney:Orcadian:p:+:E
-s:Scotland:Scottish:p:-:E
+s:Scotland:Scottish:p:l:E
 I:Ireland:Irish:p:l:E
 B:Brittany:Breton:p:+:E
 f:France:French:p:-:f
 n:Normandy:Norman:p:+:E
-b:Burgundy:Burgundian:p:l:f
+b:Burgundy:Burgundian:p:+:f
 `:Sardinia:Sardinian:r:l:E
-p:Pamplona:Pamplonese:p:+:E
+p:Pamplona:Pamplonese:p:-:E
 l:Leon:Leonese:p:-:E
 U:Caliphate of Cordova:Cordovan:p:-:E
 A:Fatimid Caliphate:Moorish:p:l:E
 y:Sicily:Sicilian:p:l:E
-P:Papal States:Papal:p:+:E
+P:Papal States:Papal:p:-:E
 V:Venice:Venetian:r:+:E
 S:Salerno:Salernan:p:+:E
 ':Benevento:Beneventan:p:+:E
-C:Capua:Capuan:p:+:E
+c:Capua:Capuan:p:+:E
 a:Amalfi:Amalfian:p:+:E
 ":San Marino:Sanmarinese:r:+:E
 +:Holy Roman Empire:German:p:+:E
 |:Poland:Polish:p:-:|
 ~:Hungary:Magyar:p:-:E
-T:State of the Teutonic Order:Pruthenic:p:+:E
+t:State of the Teutonic Order:Pruthenic:p:+:E
 R:Rus:Russian:p:-:R
-c:Croatia:Croatian:p:-:c
+C:Croatia:Croatian:p:-:c
 r:Serbia:Serbian:p:+:c
 !:Bulgaria:Bulgarian:p:+:!
 @:Byzantine Empire:Byzantine:p:+:E
